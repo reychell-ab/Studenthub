@@ -1,310 +1,449 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../lib/authContext";
-import { agregarCurso, obtenerCursos, actualizarCurso, eliminarCurso } from "../../lib/db";
+import { agregarCurso, obtenerCursos, actualizarCurso, eliminarCurso, guardarPlanCarrera, obtenerPlanCarrera, actualizarCursosPlan } from "../../lib/db";
+import Sidebar from "../../components/Sidebar";
 import GalaxyBtn from "../../components/GalaxyBtn";
 import PageLoader from "../../components/PageLoader";
-import Sidebar from "../../components/Sidebar";
 
-const ESTADOS = ["activo","aprobado","reprobado","pendiente","retirado"];
-const ESTADO_BADGE = { activo:"blue", aprobado:"green", reprobado:"red", pendiente:"gray", retirado:"yellow" };
 
-function calcularNotaNecesaria(notaActual, peso, puntajeMax) {
-  // ¿Cuánto necesito en el rubro restante para pasar?
-  const faltante = 100 - peso;
-  if (faltante <= 0) return null;
-  const necesito = (70 - (notaActual * peso / 100)) / (faltante / 100);
-  return Math.min(Math.max(necesito, 0), puntajeMax || 100);
-}
 
-function promedioGeneral(cursos) {
-  const aprobados = cursos.filter(c => c.nota !== undefined && c.nota !== "" && c.estado === "aprobado");
-  if (aprobados.length === 0) return null;
-  return aprobados.reduce((s,c) => s + Number(c.nota), 0) / aprobados.length;
-}
 
 export default function ProgresoPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
-  const [cursos, setCursos] = useState([]);
+  const [cursos, setCursos] = useState([]); // cursos manuales (legacy)
+  const [plan, setPlan] = useState(null);   // plan completo del PDF
+  const [ciclos, setCiclos] = useState({}); // { 1: [...cursos], 2: [...] }
   const [cargando, setCargando] = useState(true);
-  const [modal, setModal] = useState(false);
-  const [modalCalc, setModalCalc] = useState(false);
-  const [form, setForm] = useState({ nombre:"", codigo:"", creditos:"", semestre:"", nota:"", estado:"activo" });
-  const [calc, setCalc] = useState({ notaActual:"", peso:"", notaMax:"100" });
+  const [modalCurso, setModalCurso] = useState(false);
+  const [editandoCurso, setEditandoCurso] = useState(null); // { ciclo, idx }
+  const [formCurso, setFormCurso] = useState({ sigla: "", nombre: "", creditos: "", anio: 1, semestre: "I", estado: "pendiente", nota: "" });
   const [guardando, setGuardando] = useState(false);
   const [msg, setMsg] = useState(null);
-  const [editId, setEditId] = useState(null);
+  const [verAnio, setVerAnio] = useState("todos");
 
   useEffect(() => { if (!loading && !user) router.replace("/login"); }, [user, loading, router]);
   useEffect(() => {
     if (!user) return;
-    obtenerCursos(user.uid).then(c => { setCursos(c); setCargando(false); });
+    Promise.all([obtenerCursos(user.uid), obtenerPlanCarrera(user.uid)]).then(([cs, p]) => {
+      setCursos(cs);
+      if (p) {
+        setPlan(p);
+        setCiclos(p.ciclos || {});
+      }
+      setCargando(false);
+    });
   }, [user]);
 
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-  const setC = (k, v) => setCalc(f => ({ ...f, [k]: v }));
+  const setF = (k, v) => setFormCurso(f => ({ ...f, [k]: v }));
+  const showMsg = (tipo, texto) => { setMsg({ tipo, texto }); setTimeout(() => setMsg(null), 3000); };
 
-  const abrirEditar = (c) => {
-    setEditId(c.id);
-    setForm({ nombre:c.nombre, codigo:c.codigo||"", creditos:c.creditos, semestre:c.semestre||"", nota:c.nota||"", estado:c.estado });
-    setModal(true);
+  // ── Cargar PDF via API route ──────────────────────────────
+  const handlePdf = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setCargandoPdf(true);
+    try {
+      const formData = new FormData();
+      formData.append("pdf", file);
+
+      const res = await fetch("/api/parsear-plan", { method: "POST", body: formData });
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        showMsg("error", data.error || "No se pudo procesar el PDF.");
+      } else {
+        setCiclos(data.ciclos);
+        const planData = { ciclos: data.ciclos, nombre: data.carrera || file.name };
+        const ref = await guardarPlanCarrera(user.uid, planData);
+        setPlan({ id: ref?.id || "actual", ...planData });
+        showMsg("success", `✅ Plan cargado: ${data.totalCursos} cursos en ${data.totalCiclos} ciclos.`);
+      }
+    } catch (err) {
+      console.error(err);
+      showMsg("error", "Error de conexión al procesar el PDF.");
+    }
+    setCargandoPdf(false);
+    setModalPdf(false);
+    if (fileRef.current) fileRef.current.value = "";
   };
 
-  const handleGuardar = async (e) => {
+  // ── Guardar cambio en curso del plan ──────────────────────
+  const guardarCambioCurso = async (cicloNum, idx, cambios) => {
+    const nuevos = { ...ciclos };
+    nuevos[cicloNum] = [...nuevos[cicloNum]];
+    nuevos[cicloNum][idx] = { ...nuevos[cicloNum][idx], ...cambios };
+    setCiclos(nuevos);
+    if (plan?.id) {
+      await actualizarCursosPlan(user.uid, plan.id, nuevos);
+    }
+  };
+
+  // ── Agregar curso manual ──────────────────────────────────
+  const handleAgregarCurso = async (e) => {
     e.preventDefault();
-    if (!form.nombre.trim() || !form.creditos) {
-      setMsg({ tipo:"error", texto:"Completa nombre y créditos." });
-      return;
-    }
+    if (!formCurso.nombre.trim()) { showMsg("error", "Ingresa el nombre del curso."); return; }
     setGuardando(true);
-    const datos = { nombre:form.nombre.trim(), codigo:form.codigo, creditos:Number(form.creditos), semestre:form.semestre, nota: form.nota !== "" ? Number(form.nota) : "", estado:form.estado };
-    if (editId) {
-      await actualizarCurso(user.uid, editId, datos);
-      setCursos(prev => prev.map(c => c.id === editId ? { ...c, ...datos } : c));
+    const cicloNum = (formCurso.anio - 1) * 2 + (formCurso.semestre === "I" ? 1 : 2);
+    const nuevo = {
+      sigla: formCurso.sigla.trim(),
+      nombre: formCurso.nombre.trim(),
+      creditos: Number(formCurso.creditos) || 0,
+      anio: Number(formCurso.anio),
+      semestre: formCurso.semestre,
+      estado: formCurso.estado,
+      nota: formCurso.nota,
+      color: formCurso.color
+    };
+
+    const nuevos = { ...ciclos };
+    if (!nuevos[cicloNum]) nuevos[cicloNum] = [];
+
+    if (editandoCurso) {
+      nuevos[editandoCurso.ciclo] = [...nuevos[editandoCurso.ciclo]];
+      nuevos[editandoCurso.ciclo][editandoCurso.idx] = { ...nuevos[editandoCurso.ciclo][editandoCurso.idx], ...nuevo };
     } else {
-      const ref = await agregarCurso(user.uid, datos);
-      setCursos(prev => [...prev, { id: ref.id, ...datos }]);
+      nuevos[cicloNum] = [...nuevos[cicloNum], nuevo];
     }
-    setForm({ nombre:"", codigo:"", creditos:"", semestre:"", nota:"", estado:"activo" });
-    setEditId(null);
-    setModal(false);
-    setMsg({ tipo:"success", texto: editId ? "Curso actualizado." : "Curso agregado." });
+
+    setCiclos(nuevos);
+    if (plan?.id) await actualizarCursosPlan(user.uid, plan.id, nuevos);
+    else {
+      const p = await guardarPlanCarrera(user.uid, { ciclos: nuevos, nombre: "Manual" });
+      setPlan({ id: p?.id || "actual", ciclos: nuevos, nombre: "Manual" });
+    }
+
+    setModalCurso(false); setEditandoCurso(null);
+    showMsg("success", editandoCurso ? "Curso actualizado." : "Curso agregado.");
     setGuardando(false);
-    setTimeout(() => setMsg(null), 3000);
   };
 
-  const handleEliminar = async (id) => {
-    if (!confirm("¿Eliminar este curso?")) return;
-    await eliminarCurso(user.uid, id);
-    setCursos(prev => prev.filter(c => c.id !== id));
+  const abrirEditarCurso = (cicloNum, idx) => {
+    const c = ciclos[cicloNum][idx];
+    setEditandoCurso({ ciclo: cicloNum, idx });
+    setFormCurso({
+      sigla: c.sigla || "", nombre: c.nombre || "", creditos: c.creditos || "",
+      anio: c.anio || Math.ceil(cicloNum / 2),
+      semestre: c.semestre || (cicloNum % 2 === 1 ? "I" : "II"),
+      estado: c.estado || "pendiente", nota: c.nota || "", color: c.color || "#ffffff"
+    });
+    setModalCurso(true);
   };
 
-  // Estadísticas
-  const totalCreditos = cursos.reduce((s,c) => s + Number(c.creditos||0), 0);
-  const creditosAprobados = cursos.filter(c=>c.estado==="aprobado").reduce((s,c) => s + Number(c.creditos||0), 0);
-  const pct = totalCreditos > 0 ? Math.round((creditosAprobados/totalCreditos)*100) : 0;
-  const prom = promedioGeneral(cursos);
+  const eliminarCursoPlan = async (cicloNum, idx) => {
+    if (!confirm("¿Eliminar este curso del plan?")) return;
+    const nuevos = { ...ciclos };
+    nuevos[cicloNum] = nuevos[cicloNum].filter((_, i) => i !== idx);
+    setCiclos(nuevos);
+    if (plan?.id) await actualizarCursosPlan(user.uid, plan.id, nuevos);
+    setModalCurso(false); setEditandoCurso(null);
+  };
 
-  // Calculadora notas
-  const notaNecesaria = calc.notaActual !== "" && calc.peso !== ""
-    ? calcularNotaNecesaria(Number(calc.notaActual), Number(calc.peso), Number(calc.notaMax))
-    : null;
-  const proyeccion = calc.notaActual !== "" && calc.peso !== "" && notaNecesaria !== null
-    ? (Number(calc.notaActual) * Number(calc.peso)/100) + (notaNecesaria * (100-Number(calc.peso))/100)
-    : null;
+  // ── Estadísticas ──────────────────────────────────────────
+  const todosCursos = Object.values(ciclos).flat();
+  const aprobados = todosCursos.filter(c => c.estado === "aprobado");
+  const totalCreds = todosCursos.reduce((s, c) => s + (Number(c.creditos) || 0), 0);
+  const credAprobados = aprobados.reduce((s, c) => s + (Number(c.creditos) || 0), 0);
+  const pct = totalCreds > 0 ? Math.round((credAprobados / totalCreds) * 100) : 0;
 
-  const cursosActivos = cursos.filter(c=>c.estado==="activo");
-  const cursosAprobados = cursos.filter(c=>c.estado==="aprobado");
+  // Años únicos
+  const anios = [...new Set(todosCursos.map(c => c.anio).filter(Boolean))].sort((a, b) => a - b);
+
+  // Promedio anual
+  function promedioAnio(anio) {
+    // Incluye todos los semestres del año (I, II, y verano si existe)
+    const delAnio = todosCursos.filter(c =>
+      c.anio === anio && c.estado === "aprobado" &&
+      c.nota !== "" && c.nota !== null && c.nota !== undefined &&
+      !isNaN(Number(c.nota))
+    );
+    if (!delAnio.length) return null;
+    const sumaCred = delAnio.reduce((s, c) => s + (Number(c.creditos) || 1), 0);
+    const suma = delAnio.reduce((s, c) => s + (Number(c.nota) * (Number(c.creditos) || 1)), 0);
+    return sumaCred > 0 ? suma / sumaCred : null;
+  }
+
+  // Ciclos a mostrar
+  const ciclosOrdenados = Object.keys(ciclos).map(Number).sort((a, b) => a - b)
+    .filter(c => verAnio === "todos" || ciclos[c]?.some(cur => cur.anio === Number(verAnio) || (verAnio === "verano" && cur.semestre === "Verano")));
 
   if (loading || cargando) return <PageLoader />;
 
   return (
     <div className="app-layout">
       <Sidebar />
-      <main className="main-content">
-        <div className="flex-between page-header">
+      <main className="main-content" style={{ padding: "1.5rem" }}>
+
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem", flexWrap: "wrap", gap: 8 }}>
           <div>
-            <h2>📈 Progreso Académico</h2>
-            <p>Seguimiento de carrera, notas y créditos</p>
+            <h2 style={{ fontSize: "1.5rem", fontWeight: 700, color: "#0f172a" }}>📈 Progreso Académico</h2>
+            Plan académico de estudios
+
           </div>
-          <div style={{ display:"flex", gap:8 }}>
-            <button className="btn btn-ghost" onClick={() => setModalCalc(true)}>🧮 Calcular nota</button>
-            <GalaxyBtn onClick={() => { setEditId(null); setForm({ nombre:"", codigo:"", creditos:"", semestre:"", nota:"", estado:"activo" }); setModal(true); }}>+ Agregar curso</GalaxyBtn>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button className="btn btn-ghost" onClick={() => { setEditandoCurso(null); setFormCurso({ sigla: "", nombre: "", creditos: "", anio: 1, semestre: "I", estado: "pendiente", nota: "" }); setModalCurso(true); }} style={{ fontSize: "0.875rem" }}>
+              + Agregar curso
+            </button>
           </div>
         </div>
 
-        {msg && <div className={`alert alert-${msg.tipo === "success" ? "success" : "error"}`}>{msg.texto}</div>}
+        {msg && <div className={`alert alert-${msg.tipo === "success" ? "success" : "error"}`} style={{ marginBottom: "1rem" }}>{msg.texto}</div>}
 
-        {/* Progreso general */}
-        <div className="card mb-6">
-          <div className="flex-between" style={{ marginBottom:"0.75rem" }}>
-            <span className="card-title">🎓 Progreso de carrera</span>
-            <span style={{ fontWeight:700, fontSize:"1.25rem", color:"#7c3aed" }}>{pct}%</span>
+        {/* Stats */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: "0.875rem", marginBottom: "1.25rem" }}>
+          <div className="stat-card" style={{ borderLeft: "4px solid #7c3aed" }}>
+            <div className="stat-label">🎓 Progreso</div>
+            <div className="stat-value" style={{ color: "#7c3aed" }}>{pct}%</div>
+            <div className="stat-sub">{credAprobados} / {totalCreds} créditos</div>
           </div>
-          <div className="progress-bar" style={{ height:14 }}>
-            <div className="progress-fill" style={{ width:`${pct}%`, background:"linear-gradient(90deg, #7c3aed, #2563eb)" }} />
+          <div className="stat-card" style={{ borderLeft: "4px solid #16a34a" }}>
+            <div className="stat-label">✅ Aprobados</div>
+            <div className="stat-value" style={{ color: "#16a34a" }}>{aprobados.length}</div>
+            <div className="stat-sub">de {todosCursos.length} cursos</div>
           </div>
-          <div style={{ display:"flex", justifyContent:"space-between", fontSize:"0.8125rem", color:"#64748b", marginTop:6 }}>
-            <span>{creditosAprobados} créditos aprobados</span>
-            <span>{totalCreditos - creditosAprobados} créditos restantes</span>
-          </div>
-        </div>
-
-        <div className="stat-grid">
-          <div className="stat-card"><div className="stat-label">📚 Cursos activos</div><div className="stat-value" style={{ color:"#2563eb" }}>{cursosActivos.length}</div></div>
-          <div className="stat-card"><div className="stat-label">✅ Cursos aprobados</div><div className="stat-value" style={{ color:"#16a34a" }}>{cursosAprobados.length}</div></div>
-          <div className="stat-card">
-            <div className="stat-label">📊 Promedio general</div>
-            <div className="stat-value" style={{ color: prom && prom >= 70 ? "#16a34a" : prom ? "#dc2626" : "#64748b" }}>
-              {prom !== null ? prom.toFixed(1) : "—"}
-            </div>
-          </div>
-          <div className="stat-card"><div className="stat-label">🎯 Total créditos</div><div className="stat-value">{totalCreditos}</div></div>
-        </div>
-
-        {/* Tabla de cursos */}
-        <div className="card">
-          <span className="card-title mb-4" style={{ display:"block" }}>📋 Lista de cursos</span>
-          {cursos.length === 0 ? (
-            <p className="text-muted text-center" style={{ padding:"2rem 0" }}>
-              No hay cursos registrados.<br/>
-              <button className="btn btn-primary btn-sm" style={{ marginTop:"0.75rem" }} onClick={() => setModal(true)}>+ Agregar primer curso</button>
-            </p>
-          ) : (
-            <table className="data-table">
-              <thead>
-                <tr><th>Curso</th><th>Código</th><th>Créditos</th><th>Semestre</th><th>Nota</th><th>Estado</th><th>Acciones</th></tr>
-              </thead>
-              <tbody>
-                {cursos.map(c => (
-                  <tr key={c.id}>
-                    <td style={{ fontWeight:600 }}>{c.nombre}</td>
-                    <td style={{ color:"#64748b", fontFamily:"monospace" }}>{c.codigo || "—"}</td>
-                    <td style={{ textAlign:"center", fontWeight:600 }}>{c.creditos}</td>
-                    <td style={{ color:"#64748b" }}>{c.semestre || "—"}</td>
-                    <td style={{ fontWeight:700, color: c.nota >= 70 ? "#16a34a" : c.nota !== "" && c.nota !== undefined ? "#dc2626" : "#64748b" }}>
-                      {c.nota !== "" && c.nota !== undefined ? `${Number(c.nota).toFixed(1)}` : "—"}
-                    </td>
-                    <td><span className={`badge badge-${ESTADO_BADGE[c.estado]||"gray"}`} style={{ textTransform:"capitalize" }}>{c.estado}</span></td>
-                    <td>
-                      <div style={{ display:"flex", gap:4 }}>
-                        <button className="btn btn-ghost btn-sm" onClick={() => abrirEditar(c)}>✏️</button>
-                        <button className="btn btn-ghost btn-sm" style={{ color:"#dc2626" }} onClick={() => handleEliminar(c.id)}>🗑</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-
-        {/* Modal agregar/editar curso */}
-        {modal && (
-          <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setModal(false)}>
-            <div className="modal-box">
-              <div className="modal-header">
-                <h3>{editId ? "Editar curso" : "Agregar curso"}</h3>
-                <button className="btn btn-ghost btn-sm" onClick={() => setModal(false)}>✕</button>
+          {anios.slice(-3).map(anio => {
+            const prom = promedioAnio(anio);
+            return (
+              <div key={anio} className="stat-card" style={{ borderLeft: "4px solid #2563eb" }}>
+                <div className="stat-label">📊 Año {anio}</div>
+                <div className="stat-value" style={{ color: prom ? (prom >= 70 ? "#16a34a" : "#dc2626") : "#94a3b8" }}>
+                  {prom !== null ? prom.toFixed(2) : "—"}
+                </div>
+                <div className="stat-sub">Promedio ponderado</div>
               </div>
-              <form onSubmit={handleGuardar}>
-                <div className="form-group">
-                  <label className="form-label">Nombre del curso *</label>
-                  <input className="form-input" placeholder="Ej. Cálculo 1"
-                    value={form.nombre} onChange={e => set("nombre", e.target.value)} required />
-                </div>
-                <div className="grid-2">
-                  <div className="form-group">
-                    <label className="form-label">Código</label>
-                    <input className="form-input" placeholder="MA0101"
-                      value={form.codigo} onChange={e => set("codigo", e.target.value)} />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Créditos *</label>
-                    <input className="form-input" type="number" min="1" max="20" placeholder="4"
-                      value={form.creditos} onChange={e => set("creditos", e.target.value)} required />
-                  </div>
-                </div>
-                <div className="grid-2">
-                  <div className="form-group">
-                    <label className="form-label">Semestre</label>
-                    <input className="form-input" placeholder="I-2025"
-                      value={form.semestre} onChange={e => set("semestre", e.target.value)} />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Nota final</label>
-                    <input className="form-input" type="number" min="0" max="100" step="0.1" placeholder="75.5"
-                      value={form.nota} onChange={e => set("nota", e.target.value)} />
-                  </div>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Estado</label>
-                  <select className="form-select" value={form.estado} onChange={e => set("estado", e.target.value)}>
-                    {ESTADOS.map(s => <option key={s} style={{ textTransform:"capitalize" }}>{s}</option>)}
-                  </select>
-                </div>
-                <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
-                  <button type="button" className="btn btn-ghost" onClick={() => setModal(false)}>Cancelar</button>
-                  <button type="submit" className="btn btn-primary" disabled={guardando}>
-                    {guardando ? "Guardando..." : editId ? "Actualizar" : "Agregar curso"}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
+            );
+          })}
+        </div>
 
-        {/* Modal calculadora */}
-        {modalCalc && (
-          <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setModalCalc(false)}>
-            <div className="modal-box">
-              <div className="modal-header">
-                <h3>🧮 Calculadora de notas</h3>
-                <button className="btn btn-ghost btn-sm" onClick={() => setModalCalc(false)}>✕</button>
-              </div>
-              <p style={{ fontSize:"0.875rem", color:"#64748b", marginBottom:"1rem" }}>
-                Calcula cuánto necesitas en un examen o rubro final para aprobar.
+        {/* Barra de progreso */}
+        <div className="card" style={{ marginBottom: "1rem", padding: "1rem 1.25rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: "0.875rem" }}>
+            <span style={{ color: "#64748b" }}>{credAprobados} créditos aprobados</span>
+            <span style={{ fontWeight: 700, color: "#7c3aed" }}>{pct}%</span>
+          </div>
+          <div className="progress-bar" style={{ height: 12 }}>
+            <div className="progress-fill" style={{ width: `${pct}%`, background: "linear-gradient(90deg,#7c3aed,#2563eb)" }} />
+          </div>
+        </div>
+
+        {/* Filtro por año */}
+        <div style={{ display: "flex", gap: 6, marginBottom: "1rem", flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ fontSize: "0.8125rem", color: "#64748b", fontWeight: 600 }}>Ver:</span>
+          <button className={`btn btn-sm ${verAnio === "todos" ? "btn-primary" : "btn-ghost"}`} onClick={() => setVerAnio("todos")}>Todos</button>
+          {anios.map(a => (
+            <button key={a} className={`btn btn-sm ${verAnio === a ? "btn-primary" : "btn-ghost"}`} onClick={() => setVerAnio(a)}>Año {a}</button>
+          ))}
+        </div>
+
+        {/* Tabla de ciclos */}
+        {
+          todosCursos.length === 0 ? (
+            <div className="card" style={{ textAlign: "center", padding: "3rem" }}>
+              <div style={{ fontSize: "3rem", marginBottom: "0.75rem" }}>📄</div>
+              <div style={{ fontWeight: 700, fontSize: "1.125rem", color: "#0f172a", marginBottom: 4 }}>Sin plan de estudios</div>
+              <p style={{ color: "#64748b", fontSize: "0.875rem", marginBottom: "1.25rem" }}>
+                Agregá cursos manualmente
               </p>
-              <div className="form-group">
-                <label className="form-label">Nota acumulada hasta ahora (0-100)</label>
-                <input className="form-input" type="number" min="0" max="100" step="0.1" placeholder="Ej. 65"
-                  value={calc.notaActual} onChange={e => setC("notaActual", e.target.value)} />
-              </div>
-              <div className="grid-2">
-                <div className="form-group">
-                  <label className="form-label">Porcentaje ya evaluado (%)</label>
-                  <input className="form-input" type="number" min="0" max="100" step="1" placeholder="Ej. 60"
-                    value={calc.peso} onChange={e => setC("peso", e.target.value)} />
-                  <div style={{ fontSize:"0.75rem", color:"#64748b", marginTop:4 }}>Ej: si llevás 60% del curso evaluado</div>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Nota máxima del rubro restante</label>
-                  <input className="form-input" type="number" min="1" max="100" step="1" placeholder="100"
-                    value={calc.notaMax} onChange={e => setC("notaMax", e.target.value)} />
-                </div>
-              </div>
-
-              {notaNecesaria !== null && (
-                <div style={{ background:"#eff6ff", border:"1px solid #93c5fd", borderRadius:10, padding:"1rem", marginTop:"0.5rem" }}>
-                  <div style={{ fontSize:"0.875rem", color:"#1d4ed8", fontWeight:600, marginBottom:4 }}>Resultado</div>
-                  <div style={{ display:"flex", gap:"1.5rem", flexWrap:"wrap" }}>
-                    <div>
-                      <div style={{ fontSize:"0.75rem", color:"#64748b" }}>Necesitás sacar</div>
-                      <div style={{ fontSize:"1.5rem", fontWeight:800, color: notaNecesaria > 70 ? "#dc2626" : "#16a34a" }}>
-                        {notaNecesaria.toFixed(1)}
-                      </div>
-                      <div style={{ fontSize:"0.75rem", color:"#64748b" }}>en el {100-Number(calc.peso)}% restante</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize:"0.75rem", color:"#64748b" }}>Nota proyectada</div>
-                      <div style={{ fontSize:"1.5rem", fontWeight:800, color: proyeccion >= 70 ? "#16a34a" : "#dc2626" }}>
-                        {proyeccion?.toFixed(1)}
-                      </div>
-                      <div style={{ fontSize:"0.75rem", color:"#64748b" }}>si sacás lo necesario</div>
-                    </div>
-                  </div>
-                  {notaNecesaria > Number(calc.notaMax) && (
-                    <div className="alert alert-error" style={{ marginTop:"0.75rem", marginBottom:0 }}>
-                      ⚠️ No es posible aprobar con la nota acumulada actual. La nota necesaria supera el máximo del rubro.
-                    </div>
-                  )}
-                  {notaNecesaria <= 0 && (
-                    <div className="alert alert-success" style={{ marginTop:"0.75rem", marginBottom:0 }}>
-                      ✅ ¡Ya tenés asegurada la nota mínima para aprobar!
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <div style={{ display:"flex", justifyContent:"flex-end", marginTop:"1rem" }}>
-                <button className="btn btn-ghost" onClick={() => { setModalCalc(false); setCalc({ notaActual:"", peso:"", notaMax:"100" }); }}>Cerrar</button>
+              <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+                <button className="btn btn-ghost" onClick={() => setModalPdf(true)}>📄 Cargar PDF</button>
+                <GalaxyBtn onClick={() => { setEditandoCurso(null); setModalCurso(true); }}>+ Agregar curso</GalaxyBtn>
               </div>
             </div>
-          </div>
-        )}
-      </main>
-    </div>
+          ) : (
+            ciclosOrdenados.map(cicloNum => {
+              const cursosDelCiclo = (ciclos[cicloNum] || []).filter(c =>
+                verAnio === "todos" || c.anio === Number(verAnio)
+              );
+              if (cursosDelCiclo.length === 0) return null;
+              const anio = cursosDelCiclo?.[0]?.anio || Math.ceil(cicloNum / 2);
+              const sem = cicloNum % 2 === 1 ? "I Semestre" : "II Semestre";
+              const credsCiclo = cursosDelCiclo.reduce((s, c) => s + (Number(c.creditos) || 0), 0);
+              const aprobCiclo = cursosDelCiclo.filter(c => c.estado === "aprobado").length;
+
+              return (
+                <div key={cicloNum} className="card" style={{ marginBottom: "1rem", padding: 0, overflow: "hidden" }}>
+                  <div style={{ padding: "0.75rem 1rem", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div>
+                      <span style={{ fontWeight: 700, color: "#0f172a" }}>Ciclo {cicloNum} — Año {Math.ceil(cicloNum / 2)} · {sem}</span>
+                      <span style={{ fontSize: "0.8125rem", color: "#64748b", marginLeft: 12 }}>{aprobCiclo}/{cursosDelCiclo.length} aprobados · {credsCiclo} créditos</span>
+                    </div>
+                  </div>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Sigla</th>
+                        <th>Nombre del curso</th>
+                        <th style={{ textAlign: "center" }}>Cred.</th>
+                        <th>Estado</th>
+                        <th style={{ width: 80 }}>Nota</th>
+                        <th style={{ width: 40 }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cursosDelCiclo.map((curso, idx) => {
+                        const realIdx = (ciclos[cicloNum] || []).findIndex(c => c === curso);
+                        const isAprobado = curso.estado === "aprobado";
+                        return (
+                          <tr key={idx}>
+
+                            <td style={{ fontFamily: "monospace", fontSize: "0.8125rem", color: "#475569" }}>{curso.sigla || "—"}</td>
+                            <td style={{ fontWeight: isAprobado ? 600 : 400 }}>{curso.nombre}</td>
+                            <td style={{ textAlign: "center", fontWeight: 600 }}>{curso.creditos}</td>
+                            <td>
+                              <select
+                                value={curso.estado || "pendiente"}
+                                onChange={e => guardarCambioCurso(cicloNum, realIdx, { estado: e.target.value })}
+                                style={{
+                                  fontSize: "0.75rem", fontWeight: 600, padding: "2px 6px",
+                                  borderRadius: 6, border: "none", cursor: "pointer",
+                                  background: curso.estado === "aprobado" ? "#dcfce7" : curso.estado === "reprobado" ? "#fee2e2" : curso.estado === "matriculado" ? "#dbeafe" : "#f1f5f9",
+                                  color: curso.estado === "aprobado" ? "#15803d" : curso.estado === "reprobado" ? "#b91c1c" : curso.estado === "matriculado" ? "#1d4ed8" : "#475569"
+                                }}
+                              >
+                                <option value="pendiente">Pendiente</option>
+                                <option value="matriculado">Matriculado</option>
+                                <option value="aprobado">Aprobado</option>
+                                <option value="reprobado">Reprobado</option>
+                                <option value="retirado">Retirado</option>
+                              </select>
+                            </td>
+                            <td>
+                              {isAprobado ? (
+                                <input
+                                  type="number" min="0" max="10" step="0.5"
+                                  value={curso.nota || ""}
+                                  onChange={e => guardarCambioCurso(cicloNum, realIdx, { nota: e.target.value })}
+                                  placeholder="0.0"
+                                  style={{
+                                    width: 64, padding: "2px 6px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: "0.8125rem", fontWeight: 700,
+                                    color: Number(curso.nota) >= 7 ? "#15803d" : "#b91c1c"
+                                  }}
+                                />
+                              ) : <span style={{ color: "#94a3b8", fontSize: "0.8125rem" }}>—</span>}
+                            </td>
+                            <td>
+                              <button className="btn btn-ghost btn-sm" onClick={() => abrirEditarCurso(cicloNum, realIdx)} style={{ padding: "2px 6px" }}>✏️</button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })
+          )
+        }
+
+        {/* Tabla de promedios anuales */}
+        {
+          anios.length > 0 && (
+            <div className="card" style={{ marginTop: "1rem" }}>
+              <span className="card-title" style={{ display: "block", marginBottom: "0.75rem" }}>📊 Promedios anuales</span>
+              <table className="data-table">
+                <thead>
+                  <tr><th>Año</th><th>Ciclos incluidos</th><th>Cursos aprobados</th><th>Créditos</th><th>Promedio ponderado</th></tr>
+                </thead>
+                <tbody>
+                  {anios.map(anio => {
+                    const prom = promedioAnio(anio);
+                    const delAnio = todosCursos.filter(c => c.anio === anio);
+                    const aprobDelAnio = delAnio.filter(c => c.estado === "aprobado");
+                    const credsAnio = aprobDelAnio.reduce((s, c) => s + (Number(c.creditos) || 0), 0);
+                    // Ciclos de este año
+                    const ciclosAnio = Object.keys(ciclos).map(Number).filter(n => Math.ceil(n / 2) === anio).sort();
+                    return (
+                      <tr key={anio}>
+                        <td style={{ fontWeight: 700 }}>Año {anio}</td>
+                        <td style={{ color: "#64748b" }}>{ciclosAnio.map(c => `Ciclo ${c}`).join(", ")}</td>
+                        <td>{aprobDelAnio.length} / {delAnio.length}</td>
+                        <td>{credsAnio}</td>
+                        <td style={{ fontWeight: 800, fontSize: "1.125rem", color: prom === null ? "#94a3b8" : prom >= 7 ? "#16a34a" : "#dc2626" }}>
+                          {prom !== null ? prom.toFixed(2) : "Sin datos"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <p style={{ fontSize: "0.75rem", color: "#94a3b8", marginTop: "0.5rem" }}>
+                * Promedio ponderado por créditos. Incluye todos los ciclos del año (I, II y Verano si aplica). Notas en escala 0-10 (UCR).
+              </p>
+            </div>
+          )
+        }
+
+        {/* Modal agregar/editar curso manual */}
+        {
+          modalCurso && (
+            <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModalCurso(false)}>
+              <div className="modal-box" style={{ maxWidth: 500 }}>
+                <div className="modal-header">
+                  <h3>{editandoCurso ? "Editar curso" : "Agregar curso manualmente"}</h3>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setModalCurso(false)}>✕</button>
+                </div>
+                <form onSubmit={handleAgregarCurso}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "0.75rem" }}>
+                    <div className="form-group">
+                      <label className="form-label">Sigla</label>
+                      <input className="form-input" placeholder="IF4101" value={formCurso.sigla} onChange={e => setF("sigla", e.target.value)} />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Nombre del curso *</label>
+                      <input className="form-input" placeholder="Ej. Cálculo Diferencial" value={formCurso.nombre} onChange={e => setF("nombre", e.target.value)} required />
+                    </div>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.75rem" }}>
+                    <div className="form-group">
+                      <label className="form-label">Créditos</label>
+                      <input className="form-input" type="number" min="0" max="20" value={formCurso.creditos} onChange={e => setF("creditos", e.target.value)} />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Año</label>
+                      <select className="form-select" value={formCurso.anio} onChange={e => setF("anio", e.target.value)}>
+                        {[1, 2, 3, 4, 5, 6, 7, 8].map(a => <option key={a} value={a}>Año {a}</option>)}
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Semestre</label>
+                      <select className="form-select" value={formCurso.semestre} onChange={e => setF("semestre", e.target.value)}>
+                        <option value="I">I Semestre</option>
+                        <option value="II">II Semestre</option>
+                        <option value="Verano">Verano</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+                    <div className="form-group">
+                      <label className="form-label">Estado</label>
+                      <select className="form-select" value={formCurso.estado} onChange={e => setF("estado", e.target.value)}>
+                        <option value="pendiente">Pendiente</option>
+                        <option value="matriculado">Matriculado</option>
+                        <option value="aprobado">Aprobado</option>
+                        <option value="reprobado">Reprobado</option>
+                        <option value="retirado">Retirado</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Nota (si aprobado)</label>
+                      <input className="form-input" type="number" min="0" max="10" step="0.5" placeholder="Ej. 8.5" value={formCurso.nota} onChange={e => setF("nota", e.target.value)} />
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                    {editandoCurso && <button type="button" className="btn btn-danger btn-sm" onClick={() => eliminarCursoPlan(editandoCurso.ciclo, editandoCurso.idx)}>Eliminar</button>}
+                    <button type="button" className="btn btn-ghost" onClick={() => setModalCurso(false)}>Cancelar</button>
+                    <button type="submit" className="btn btn-primary" disabled={guardando}>{guardando ? "Guardando..." : editandoCurso ? "Actualizar" : "Agregar"}</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )
+        }
+      </main >
+    </div >
   );
 }

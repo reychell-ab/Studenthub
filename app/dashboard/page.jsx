@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../lib/authContext";
-import { obtenerGastos, obtenerAgenda, obtenerCursos } from "../../lib/db";
+import { obtenerGastos, obtenerAgenda, obtenerPlanCarrera } from "../../lib/db";
 import GalaxyBtn from "../../components/GalaxyBtn";
 import PageLoader from "../../components/PageLoader";
 import Sidebar from "../../components/Sidebar";
@@ -17,15 +17,18 @@ function calcularResumenGastos(gastos) {
 function obtenerProximasActividades(agenda) {
   const hoy = new Date().toISOString().split("T")[0];
   return agenda
-    .filter(a => a.fecha >= hoy && !a.completada)
+    .filter(a => a.fecha >= hoy && a.columna !== "realizado" && !a.completada)
     .slice(0, 4);
 }
 
-function calcularProgresoCarrera(cursos) {
-  const aprobados = cursos.filter(c => c.estado === "aprobado");
-  const totalCreditos = cursos.reduce((s, c) => s + Number(c.creditos || 0), 0);
+// Lee los cursos del planCarrera (ciclos) y calcula progreso
+function calcularProgresoDesde(plan) {
+  if (!plan?.ciclos) return { totalCreditos: 0, creditosAprobados: 0, todosCursos: [] };
+  const todosCursos = Object.values(plan.ciclos).flat();
+  const aprobados = todosCursos.filter(c => c.estado === "aprobado");
+  const totalCreditos = todosCursos.reduce((s, c) => s + Number(c.creditos || 0), 0);
   const creditosAprobados = aprobados.reduce((s, c) => s + Number(c.creditos || 0), 0);
-  return { totalCreditos, creditosAprobados };
+  return { totalCreditos, creditosAprobados, todosCursos };
 }
 
 export default function DashboardPage() {
@@ -33,7 +36,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const [gastos, setGastos] = useState([]);
   const [agenda, setAgenda] = useState([]);
-  const [cursos, setCursos] = useState([]);
+  const [plan, setPlan] = useState(null);
   const [cargando, setCargando] = useState(true);
 
   useEffect(() => {
@@ -43,14 +46,14 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!user) return;
     async function cargar() {
-      const [g, a, c] = await Promise.all([
+      const [g, a, p] = await Promise.all([
         obtenerGastos(user.uid),
         obtenerAgenda(user.uid),
-        obtenerCursos(user.uid)
+        obtenerPlanCarrera(user.uid),
       ]);
       setGastos(g);
       setAgenda(a);
-      setCursos(c);
+      setPlan(p);
       setCargando(false);
     }
     cargar();
@@ -61,7 +64,7 @@ export default function DashboardPage() {
 
   const { ingresos, egresos, disponible } = calcularResumenGastos(gastos);
   const proximasActs = obtenerProximasActividades(agenda);
-  const { totalCreditos, creditosAprobados } = calcularProgresoCarrera(cursos);
+  const { totalCreditos, creditosAprobados, todosCursos } = calcularProgresoDesde(plan);
   const pctProgreso = totalCreditos > 0 ? Math.round((creditosAprobados / totalCreditos) * 100) : 0;
 
   const hora = new Date().getHours();
@@ -87,8 +90,8 @@ export default function DashboardPage() {
           </div>
           <div className="stat-card" style={{ borderLeft:"4px solid #2563eb" }}>
             <div className="stat-label">📅 Actividades pendientes</div>
-            <div className="stat-value">{proximasActs.length}</div>
-            <div className="stat-sub">Próximas en tu agenda</div>
+            <div className="stat-value">{agenda.filter(a => a.columna !== "realizado" && !a.completada).length}</div>
+            <div className="stat-sub">En agenda sin completar</div>
           </div>
           <div className="stat-card" style={{ borderLeft:"4px solid #7c3aed" }}>
             <div className="stat-label">🎓 Progreso carrera</div>
@@ -97,8 +100,8 @@ export default function DashboardPage() {
           </div>
           <div className="stat-card" style={{ borderLeft:"4px solid #d97706" }}>
             <div className="stat-label">📚 Cursos registrados</div>
-            <div className="stat-value">{cursos.length}</div>
-            <div className="stat-sub">{cursos.filter(c=>c.estado==="activo").length} activos este semestre</div>
+            <div className="stat-value">{todosCursos.length}</div>
+            <div className="stat-sub">{todosCursos.filter(c => c.estado === "matriculado").length} matriculados</div>
           </div>
         </div>
 
@@ -161,7 +164,7 @@ export default function DashboardPage() {
             <span className="card-title">🎓 Progreso de carrera</span>
             <Link href="/progreso" style={{ fontSize:"0.8125rem", color:"#2563eb", textDecoration:"none", fontWeight:600 }}>Gestionar →</Link>
           </div>
-          {cursos.length === 0 ? (
+          {todosCursos.length === 0 ? (
             <p className="text-muted text-center" style={{ padding:"1rem 0" }}>
               No has registrado cursos aún.<br/>
               <Link href="/progreso" style={{ color:"#2563eb" }}>Agregar cursos →</Link>
@@ -176,9 +179,9 @@ export default function DashboardPage() {
                 <div className="progress-fill" style={{ width:`${pctProgreso}%`, background:"#7c3aed" }} />
               </div>
               <div style={{ display:"flex", gap:"1rem", marginTop:"1rem", flexWrap:"wrap" }}>
-                {["aprobado","activo","pendiente"].map(est => {
-                  const cnt = cursos.filter(c=>c.estado===est).length;
-                  const colores = { aprobado:"#16a34a", activo:"#2563eb", pendiente:"#d97706" };
+                {["aprobado","matriculado","pendiente"].map(est => {
+                  const cnt = todosCursos.filter(c => c.estado === est).length;
+                  const colores = { aprobado:"#16a34a", matriculado:"#2563eb", pendiente:"#d97706" };
                   return (
                     <div key={est} style={{ display:"flex", alignItems:"center", gap:6, fontSize:"0.8125rem" }}>
                       <div style={{ width:10, height:10, borderRadius:"50%", background:colores[est] }} />

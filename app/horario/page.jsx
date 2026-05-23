@@ -12,27 +12,44 @@ import Sidebar from "../../components/Sidebar";
 
 // ── Constantes ───────────────────────────────────────────
 const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
-const DIAS_CORTO = ["L", "Ma", "Mi", "J", "V", "S"];
+const DIAS_CORTO = ["L", "K", "M", "J", "V", "S"];
 const HORA_INICIO = 7;   // 7:00 AM
 const HORA_FIN    = 22;  // 10:00 PM
 const SLOT_H      = 56;  // px por hora
 
 const COLORES = [
-  { id:"blue",   bg:"#2563eb", light:"#dbeafe", text:"#1d4ed8" },
-  { id:"green",  bg:"#16a34a", light:"#dcfce7", text:"#15803d" },
-  { id:"amber",  bg:"#d97706", light:"#fef3c7", text:"#b45309" },
-  { id:"red",    bg:"#dc2626", light:"#fee2e2", text:"#b91c1c" },
-  { id:"purple", bg:"#7c3aed", light:"#ede9fe", text:"#6d28d9" },
-  { id:"pink",   bg:"#db2777", light:"#fce7f3", text:"#be185d" },
-  { id:"teal",   bg:"#0d9488", light:"#ccfbf1", text:"#0f766e" },
-  { id:"orange", bg:"#ea580c", light:"#ffedd5", text:"#c2410c" },
+  { id:"blue",     bg:"#2563eb", light:"#dbeafe", text:"#1d4ed8" },
+  { id:"green",    bg:"#16a34a", light:"#dcfce7", text:"#15803d" },
+  { id:"amber",    bg:"#d97706", light:"#fef3c7", text:"#b45309" },
+  { id:"red",      bg:"#dc2626", light:"#fee2e2", text:"#b91c1c" },
+  { id:"purple",   bg:"#7c3aed", light:"#ede9fe", text:"#6d28d9" },
+  { id:"pink",     bg:"#db2777", light:"#fce7f3", text:"#be185d" },
+  { id:"teal",     bg:"#0d9488", light:"#ccfbf1", text:"#0f766e" },
+  { id:"orange",   bg:"#ea580c", light:"#ffedd5", text:"#c2410c" },
+  { id:"indigo",   bg:"#4f46e5", light:"#e0e7ff", text:"#4338ca" },
+  { id:"cyan",     bg:"#0891b2", light:"#cffafe", text:"#0e7490" },
+  { id:"lime",     bg:"#65a30d", light:"#ecfccb", text:"#4d7c0f" },
+  { id:"rose",     bg:"#e11d48", light:"#ffe4e6", text:"#be123c" },
+  { id:"sky",      bg:"#0284c7", light:"#e0f2fe", text:"#0369a1" },
+  { id:"violet",   bg:"#7c3aed", light:"#f5f3ff", text:"#5b21b6" },
+  { id:"fuchsia",  bg:"#a21caf", light:"#fdf4ff", text:"#86198f" },
+  { id:"slate",    bg:"#475569", light:"#f1f5f9", text:"#334155" },
 ];
 
 // ── Utilidades ───────────────────────────────────────────
 function horaAMinutos(hora) {
-  // "07:30" → 450
   const [h, m] = hora.split(":").map(Number);
   return h * 60 + (m || 0);
+}
+
+function formatoHora12(hora) {
+  if (!hora) return "";
+
+  const [h, m] = hora.split(":").map(Number);
+  const periodo = h >= 12 ? "PM" : "AM";
+  const hora12 = h % 12 || 12;
+
+  return `${hora12}:${String(m || 0).padStart(2, "0")} ${periodo}`;
 }
 
 function minutosAPixeles(minutos) {
@@ -93,6 +110,7 @@ export default function HorarioPage() {
     horaInicio: "07:00", horaFin: "07:50", color: "blue"
   };
   const [form, setForm] = useState(formInicial);
+  const [modoNombre, setModoNombre] = useState("nuevo"); // "nuevo" | "existente"
 
   useEffect(() => { if (!loading && !user) router.replace("/login"); }, [user, loading, router]);
 
@@ -113,12 +131,14 @@ export default function HorarioPage() {
   const abrirAgregar = () => {
     setEditando(null);
     setForm(formInicial);
+    setModoNombre("nuevo");
     setModal(true);
   };
 
   const abrirEditar = (e) => {
     setEditando(e.id);
     setForm({ nombre:e.nombre, aula:e.aula||"", dias:e.dias, horaInicio:e.horaInicio, horaFin:e.horaFin, color:e.color||"blue" });
+    setModoNombre("nuevo");
     setModal(true);
   };
 
@@ -336,22 +356,20 @@ export default function HorarioPage() {
                             borderRadius: 6,
                             padding: "3px 6px",
                             cursor: "pointer",
-                            overflow: "hidden",
                             zIndex: 2,
                             transition: "opacity 0.15s",
                           }}
                           onMouseEnter={e => e.currentTarget.style.opacity="0.85"}
                           onMouseLeave={e => e.currentTarget.style.opacity="1"}
+                          title={`${entrada.nombre}${entrada.aula ? " · " + entrada.aula : ""} | ${formatoHora12(entrada.horaInicio)} – ${formatoHora12(entrada.horaFin)}`}
                         >
-                          <div style={{ fontSize:"0.75rem", fontWeight:700, color:c.text, lineHeight:1.2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                          <div style={{ fontSize:"0.72rem", fontWeight:700, color:c.text, lineHeight:1.25, wordBreak:"break-word", overflowWrap:"break-word", whiteSpace:"pre-wrap" }}>
                             {entrada.nombre}
                           </div>
-                          {altura > 36 && (
-                            <div style={{ fontSize:"0.68rem", color:c.text, opacity:0.75, marginTop:1 }}>
-                              {entrada.horaInicio} - {entrada.horaFin}
-                              {entrada.aula && ` · ${entrada.aula}`}
-                            </div>
-                          )}
+                          <div style={{ fontSize:"0.65rem", color:c.text, opacity:0.8, marginTop:2, lineHeight:1.2 }}>
+                            {formatoHora12(entrada.horaInicio)}–{formatoHora12(entrada.horaFin)}
+                            {entrada.aula ? ` · ${entrada.aula}` : ""}
+                          </div>
                         </div>
                       );
                     })}
@@ -431,17 +449,47 @@ export default function HorarioPage() {
               {msg && <div className={`alert alert-${msg.tipo === "success" ? "success" : "error"}`}>{msg.texto}</div>}
 
               <form onSubmit={handleGuardar}>
-                <div className="grid-2">
-                  <div className="form-group">
-                    <label className="form-label">Nombre del curso *</label>
-                    <input className="form-input" placeholder="Ej. Cálculo 1"
-                      value={form.nombre} onChange={e => set("nombre", e.target.value)} required />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Aula / Lugar</label>
-                    <input className="form-input" placeholder="Ej. Aula 301"
-                      value={form.aula} onChange={e => set("aula", e.target.value)} />
-                  </div>
+                {/* Selector: curso existente o nuevo */}
+                {(() => {
+                  const nombresUnicos = [...new Set(entradas.map(e => e.nombre))].sort();
+                  return (
+                    <div className="form-group">
+                      <label className="form-label">Nombre del curso *</label>
+                      {nombresUnicos.length > 0 && (
+                        <div style={{ display:"flex", gap:6, marginBottom:8 }}>
+                          {["existente","nuevo"].map(m => (
+                            <button key={m} type="button"
+                              onClick={() => { setModoNombre(m); if(m==="nuevo") set("nombre",""); }}
+                              className={`btn btn-sm ${modoNombre===m?"btn-primary":"btn-ghost"}`}
+                              style={{ textTransform:"capitalize", flex:1 }}>
+                              {m === "existente" ? "📚 Desde existentes" : "✏️ Nombre nuevo"}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {modoNombre === "existente" && nombresUnicos.length > 0 ? (
+                        <select className="form-select" value={form.nombre}
+                          onChange={e => {
+                            const sel = entradas.find(en => en.nombre === e.target.value);
+                            set("nombre", e.target.value);
+                            if (sel) {
+                              set("color", sel.color || "blue");
+                            }
+                          }} required>
+                          <option value="">-- Seleccioná un curso --</option>
+                          {nombresUnicos.map(n => <option key={n} value={n}>{n}</option>)}
+                        </select>
+                      ) : (
+                        <input className="form-input" placeholder="Ej. Cálculo 1"
+                          value={form.nombre} onChange={e => set("nombre", e.target.value)} required />
+                      )}
+                    </div>
+                  );
+                })()}
+                <div className="form-group">
+                  <label className="form-label">Aula / Lugar</label>
+                  <input className="form-input" placeholder="Ej. Aula 301"
+                    value={form.aula} onChange={e => set("aula", e.target.value)} />
                 </div>
 
                 <div className="form-group">
