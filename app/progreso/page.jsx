@@ -2,19 +2,23 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../lib/authContext";
-import { agregarCurso, obtenerCursos, actualizarCurso, eliminarCurso, guardarPlanCarrera, obtenerPlanCarrera, actualizarCursosPlan } from "../../lib/db";
+import {
+  agregarCurso,
+  obtenerCursos,
+  actualizarCurso,
+  eliminarCurso,
+  guardarPerfil,
+  obtenerPerfil
+} from "../../lib/db";
 import Sidebar from "../../components/Sidebar";
 import GalaxyBtn from "../../components/GalaxyBtn";
 import PageLoader from "../../components/PageLoader";
-
-
-
 
 export default function ProgresoPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const [cursos, setCursos] = useState([]); // cursos manuales (legacy)
-  const [plan, setPlan] = useState(null);   // plan completo del PDF
+     // plan completo del PDF
   const [ciclos, setCiclos] = useState({}); // { 1: [...cursos], 2: [...] }
   const [cargando, setCargando] = useState(true);
   const [modalCurso, setModalCurso] = useState(false);
@@ -23,16 +27,47 @@ export default function ProgresoPage() {
   const [guardando, setGuardando] = useState(false);
   const [msg, setMsg] = useState(null);
   const [verAnio, setVerAnio] = useState("todos");
+  const [perfil, setPerfil] = useState(null);
+
+const [carrera, setCarrera] = useState("");
+const [universidad, setUniversidad] = useState("");
+const [creditosTotales, setCreditosTotales] = useState("");
+const [editandoPerfil, setEditandoPerfil] = useState(false);
 
   useEffect(() => { if (!loading && !user) router.replace("/login"); }, [user, loading, router]);
   useEffect(() => {
     if (!user) return;
-    Promise.all([obtenerCursos(user.uid), obtenerPlanCarrera(user.uid)]).then(([cs, p]) => {
-      setCursos(cs);
-      if (p) {
-        setPlan(p);
-        setCiclos(p.ciclos || {});
-      }
+Promise.all([
+  obtenerCursos(user.uid),
+  obtenerPerfil(user.uid)
+]).then(([cs, perfilData]) => {
+            setCursos(cs);
+
+            const cursosPorCiclo = {};
+
+cs.forEach((curso) => {
+  const ciclo =
+    (Number(curso.anio || 1) - 1) * 2 +
+    (curso.semestre === "I" ? 1 : 2);
+
+  if (!cursosPorCiclo[ciclo]) {
+    cursosPorCiclo[ciclo] = [];
+  }
+
+  cursosPorCiclo[ciclo].push(curso);
+});
+
+setCiclos(cursosPorCiclo);
+
+            if (perfilData) {
+  setPerfil(perfilData);
+  setCarrera(perfilData.carrera || "");
+  setUniversidad(perfilData.universidad || "");
+  setCreditosTotales(perfilData.creditosTotales || "");
+}
+if (!perfilData) {
+  setEditandoPerfil(true);
+}
       setCargando(false);
     });
   }, [user]);
@@ -40,53 +75,56 @@ export default function ProgresoPage() {
   const setF = (k, v) => setFormCurso(f => ({ ...f, [k]: v }));
   const showMsg = (tipo, texto) => { setMsg({ tipo, texto }); setTimeout(() => setMsg(null), 3000); };
 
-  // ── Cargar PDF via API route ──────────────────────────────
-  const handlePdf = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setCargandoPdf(true);
-    try {
-      const formData = new FormData();
-      formData.append("pdf", file);
+  const guardarDatosPerfil = async () => {
+  try {
+    await guardarPerfil(user.uid, {
+      carrera,
+      universidad,
+      creditosTotales: Number(creditosTotales)
+    });
 
-      const res = await fetch("/api/parsear-plan", { method: "POST", body: formData });
-      const data = await res.json();
+    setPerfil({
+      carrera,
+      universidad,
+      creditosTotales: Number(creditosTotales)
+    });
 
-      if (!res.ok || data.error) {
-        showMsg("error", data.error || "No se pudo procesar el PDF.");
-      } else {
-        setCiclos(data.ciclos);
-        const planData = { ciclos: data.ciclos, nombre: data.carrera || file.name };
-        const ref = await guardarPlanCarrera(user.uid, planData);
-        setPlan({ id: ref?.id || "actual", ...planData });
-        showMsg("success", `✅ Plan cargado: ${data.totalCursos} cursos en ${data.totalCiclos} ciclos.`);
-      }
-    } catch (err) {
-      console.error(err);
-      showMsg("error", "Error de conexión al procesar el PDF.");
-    }
-    setCargandoPdf(false);
-    setModalPdf(false);
-    if (fileRef.current) fileRef.current.value = "";
-  };
+    setEditandoPerfil(false);
+
+    showMsg("success", "Perfil académico guardado.");
+  } catch (error) {
+    showMsg("error", "No se pudo guardar el perfil.");
+  }
+};
 
   // ── Guardar cambio en curso del plan ──────────────────────
   const guardarCambioCurso = async (cicloNum, idx, cambios) => {
-    const nuevos = { ...ciclos };
-    nuevos[cicloNum] = [...nuevos[cicloNum]];
-    nuevos[cicloNum][idx] = { ...nuevos[cicloNum][idx], ...cambios };
-    setCiclos(nuevos);
-    if (plan?.id) {
-      await actualizarCursosPlan(user.uid, plan.id, nuevos);
-    }
+  const curso = ciclos[cicloNum][idx];
+
+  await actualizarCurso(user.uid, curso.id, cambios);
+
+  const nuevos = { ...ciclos };
+  nuevos[cicloNum] = [...nuevos[cicloNum]];
+  nuevos[cicloNum][idx] = {
+    ...nuevos[cicloNum][idx],
+    ...cambios
   };
 
+  setCiclos(nuevos);
+};
+
   // ── Agregar curso manual ──────────────────────────────────
-  const handleAgregarCurso = async (e) => {
-    e.preventDefault();
-    if (!formCurso.nombre.trim()) { showMsg("error", "Ingresa el nombre del curso."); return; }
-    setGuardando(true);
-    const cicloNum = (formCurso.anio - 1) * 2 + (formCurso.semestre === "I" ? 1 : 2);
+ const handleAgregarCurso = async (e) => {
+  e.preventDefault();
+
+  if (!formCurso.nombre.trim()) {
+    showMsg("error", "Ingresa el nombre del curso.");
+    return;
+  }
+
+  setGuardando(true);
+
+  try {
     const nuevo = {
       sigla: formCurso.sigla.trim(),
       nombre: formCurso.nombre.trim(),
@@ -94,31 +132,65 @@ export default function ProgresoPage() {
       anio: Number(formCurso.anio),
       semestre: formCurso.semestre,
       estado: formCurso.estado,
-      nota: formCurso.nota,
-      color: formCurso.color
+      nota: formCurso.nota || ""
     };
 
-    const nuevos = { ...ciclos };
-    if (!nuevos[cicloNum]) nuevos[cicloNum] = [];
-
     if (editandoCurso) {
-      nuevos[editandoCurso.ciclo] = [...nuevos[editandoCurso.ciclo]];
-      nuevos[editandoCurso.ciclo][editandoCurso.idx] = { ...nuevos[editandoCurso.ciclo][editandoCurso.idx], ...nuevo };
+      const cursoActual =
+        ciclos[editandoCurso.ciclo][editandoCurso.idx];
+
+      await actualizarCurso(
+        user.uid,
+        cursoActual.id,
+        nuevo
+      );
+
+      const nuevos = { ...ciclos };
+      nuevos[editandoCurso.ciclo] = [
+        ...nuevos[editandoCurso.ciclo]
+      ];
+
+      nuevos[editandoCurso.ciclo][editandoCurso.idx] = {
+        ...cursoActual,
+        ...nuevo
+      };
+
+      setCiclos(nuevos);
+
+      showMsg("success", "Curso actualizado.");
     } else {
-      nuevos[cicloNum] = [...nuevos[cicloNum], nuevo];
+      const docRef = await agregarCurso(user.uid, nuevo);
+
+      const cicloNum =
+        (nuevo.anio - 1) * 2 +
+        (nuevo.semestre === "I" ? 1 : 2);
+
+      const nuevos = { ...ciclos };
+
+      if (!nuevos[cicloNum]) {
+        nuevos[cicloNum] = [];
+      }
+
+      nuevos[cicloNum].push({
+        id: docRef.id,
+        ...nuevo
+      });
+
+      setCiclos(nuevos);
+
+      showMsg("success", "Curso agregado.");
     }
 
-    setCiclos(nuevos);
-    if (plan?.id) await actualizarCursosPlan(user.uid, plan.id, nuevos);
-    else {
-      const p = await guardarPlanCarrera(user.uid, { ciclos: nuevos, nombre: "Manual" });
-      setPlan({ id: p?.id || "actual", ciclos: nuevos, nombre: "Manual" });
-    }
+    setModalCurso(false);
+    setEditandoCurso(null);
 
-    setModalCurso(false); setEditandoCurso(null);
-    showMsg("success", editandoCurso ? "Curso actualizado." : "Curso agregado.");
-    setGuardando(false);
-  };
+  } catch (error) {
+    console.error(error);
+    showMsg("error", "No se pudo guardar el curso.");
+  }
+
+  setGuardando(false);
+};
 
   const abrirEditarCurso = (cicloNum, idx) => {
     const c = ciclos[cicloNum][idx];
@@ -133,20 +205,41 @@ export default function ProgresoPage() {
   };
 
   const eliminarCursoPlan = async (cicloNum, idx) => {
-    if (!confirm("¿Eliminar este curso del plan?")) return;
-    const nuevos = { ...ciclos };
-    nuevos[cicloNum] = nuevos[cicloNum].filter((_, i) => i !== idx);
+     if (!confirm("¿Eliminar este curso?")) return;
+
+  const curso = ciclos[cicloNum][idx];
+
+  await eliminarCurso(user.uid, curso.id);
+
+  const nuevos = { ...ciclos };
+  nuevos[cicloNum] = nuevos[cicloNum].filter((_, i) =>i !== idx);
     setCiclos(nuevos);
-    if (plan?.id) await actualizarCursosPlan(user.uid, plan.id, nuevos);
     setModalCurso(false); setEditandoCurso(null);
   };
 
   // ── Estadísticas ──────────────────────────────────────────
   const todosCursos = Object.values(ciclos).flat();
   const aprobados = todosCursos.filter(c => c.estado === "aprobado");
-  const totalCreds = todosCursos.reduce((s, c) => s + (Number(c.creditos) || 0), 0);
-  const credAprobados = aprobados.reduce((s, c) => s + (Number(c.creditos) || 0), 0);
-  const pct = totalCreds > 0 ? Math.round((credAprobados / totalCreds) * 100) : 0;
+
+  const totalCreds = todosCursos.reduce(
+  (s, c) => s + (Number(c.creditos) || 0),
+  0
+);
+
+const credAprobados = aprobados.reduce(
+  (s, c) => s + (Number(c.creditos) || 0),
+  0
+);
+
+const creditosCarrera =
+  Number(perfil?.creditosTotales) || 0;
+
+const pct =
+  creditosCarrera > 0
+    ? Math.round(
+        (credAprobados / creditosCarrera) * 100
+      )
+    : 0;
 
   // Años únicos
   const anios = [...new Set(todosCursos.map(c => c.anio).filter(Boolean))].sort((a, b) => a - b);
@@ -173,22 +266,97 @@ export default function ProgresoPage() {
 
   return (
     <div className="app-layout">
-      <Sidebar />
+      <Sidebar 
+  onEditarPerfil={() => setEditandoPerfil(true)}
+/>
       <main className="main-content" style={{ padding: "1.5rem" }}>
 
         {/* Header */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem", flexWrap: "wrap", gap: 8 }}>
-          <div>
-            <h2 style={{ fontSize: "1.5rem", fontWeight: 700, color: "#0f172a" }}>📈 Progreso Académico</h2>
-            Plan académico de estudios
 
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button className="btn btn-ghost" onClick={() => { setEditandoCurso(null); setFormCurso({ sigla: "", nombre: "", creditos: "", anio: 1, semestre: "I", estado: "pendiente", nota: "" }); setModalCurso(true); }} style={{ fontSize: "0.875rem" }}>
-              + Agregar curso
-            </button>
-          </div>
-        </div>
+
+<div
+  className="card"
+  style={{
+    marginBottom: "1rem",
+    padding: "1.25rem"
+  }}
+>
+  <h3 style={{ marginBottom: "1rem" }}>
+    🎓 Perfil Académico
+  </h3>
+
+{perfil && !editandoPerfil ? (
+
+
+<div>
+  <div style={{ marginBottom: "0.75rem" }}>
+    <strong>Carrera:</strong> {perfil.carrera}
+  </div>
+
+  <div style={{ marginBottom: "0.75rem" }}>
+    <strong>Universidad:</strong> {perfil.universidad}
+  </div>
+
+  <div style={{ marginBottom: "1rem" }}>
+    <strong>Créditos totales:</strong> {perfil.creditosTotales}
+  </div>
+
+  <button
+    className="btn btn-secondary"
+    onClick={() => setEditandoPerfil(true)}
+  >
+    Editar perfil
+  </button>
+</div>
+
+) : (
+
+
+<>
+  <div
+    style={{
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))",
+      gap: "1rem"
+    }}
+  >
+    <input
+      className="form-input"
+      placeholder="Carrera"
+      value={carrera}
+      onChange={(e) => setCarrera(e.target.value)}
+    />
+
+    <input
+      className="form-input"
+      placeholder="Universidad"
+      value={universidad}
+      onChange={(e) => setUniversidad(e.target.value)}
+    />
+
+    <input
+      className="form-input"
+      type="number"
+      placeholder="Créditos totales de la carrera"
+      value={creditosTotales}
+      onChange={(e) => setCreditosTotales(e.target.value)}
+    />
+  </div>
+
+  <div style={{ marginTop: "1rem" }}>
+    <button
+      className="btn btn-primary"
+      onClick={guardarDatosPerfil}
+    >
+      Guardar perfil
+    </button>
+  </div>
+</>
+
+
+)}
+
+</div>
 
         {msg && <div className={`alert alert-${msg.tipo === "success" ? "success" : "error"}`} style={{ marginBottom: "1rem" }}>{msg.texto}</div>}
 
@@ -197,7 +365,9 @@ export default function ProgresoPage() {
           <div className="stat-card" style={{ borderLeft: "4px solid #7c3aed" }}>
             <div className="stat-label">🎓 Progreso</div>
             <div className="stat-value" style={{ color: "#7c3aed" }}>{pct}%</div>
-            <div className="stat-sub">{credAprobados} / {totalCreds} créditos</div>
+            <div className="stat-sub">
+  {credAprobados} / {creditosCarrera} créditos
+</div>
           </div>
           <div className="stat-card" style={{ borderLeft: "4px solid #16a34a" }}>
             <div className="stat-label">✅ Aprobados</div>
@@ -217,6 +387,104 @@ export default function ProgresoPage() {
             );
           })}
         </div>
+
+        {/* Perfil Académico */}
+<div
+  className="card"
+  style={{
+    marginBottom: "1.25rem",
+    padding: "1.25rem",
+    borderLeft: "4px solid #7c3aed"
+  }}
+>
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: "1rem"
+    }}
+  >
+    <div>
+      <h3
+        style={{
+          margin: 0,
+          fontSize: "1.1rem",
+          fontWeight: 700,
+          color: "#0f172a"
+        }}
+      >
+        🎓 Perfil Académico
+      </h3>
+
+      <p
+        style={{
+          marginTop: 4,
+          color: "#64748b",
+          fontSize: "0.875rem"
+        }}
+      >
+        Resumen general de tu avance universitario
+      </p>
+    </div>
+
+    <div
+      style={{
+        fontSize: "2rem",
+        fontWeight: 800,
+        color: "#7c3aed"
+      }}
+    >
+      {pct}%
+    </div>
+  </div>
+
+  <div
+    style={{
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))",
+      gap: "1rem",
+      marginTop: "1rem"
+    }}
+  >
+    <div>
+      <div style={{ color: "#94a3b8", fontSize: "0.75rem" }}>
+        Créditos aprobados
+      </div>
+      <div style={{ fontWeight: 700 }}>
+        {credAprobados}
+      </div>
+    </div>
+
+    <div>
+  <div style={{ color: "#94a3b8", fontSize: "0.75rem" }}>
+    Créditos pendientes
+  </div>
+  <div style={{ fontWeight: 700 }}>
+    {Math.max(0, creditosCarrera - credAprobados)}
+  </div>
+</div>
+
+    <div>
+      <div style={{ color: "#94a3b8", fontSize: "0.75rem" }}>
+        Cursos aprobados
+      </div>
+      <div style={{ fontWeight: 700 }}>
+        {aprobados.length}
+      </div>
+    </div>
+
+    <div>
+      <div style={{ color: "#94a3b8", fontSize: "0.75rem" }}>
+        Cursos totales
+      </div>
+      <div style={{ fontWeight: 700 }}>
+        {todosCursos.length}
+      </div>
+    </div>
+  </div>
+</div>
 
         {/* Barra de progreso */}
         <div className="card" style={{ marginBottom: "1rem", padding: "1rem 1.25rem" }}>
@@ -245,10 +513,11 @@ export default function ProgresoPage() {
               <div style={{ fontSize: "3rem", marginBottom: "0.75rem" }}>📄</div>
               <div style={{ fontWeight: 700, fontSize: "1.125rem", color: "#0f172a", marginBottom: 4 }}>Sin plan de estudios</div>
               <p style={{ color: "#64748b", fontSize: "0.875rem", marginBottom: "1.25rem" }}>
-                Agregá cursos manualmente
+            Aún no has creado tu plan académico.
+Empieza agregando cursos para visualizar tu progreso,
+créditos completados y estadísticas de rendimiento.
               </p>
               <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-                <button className="btn btn-ghost" onClick={() => setModalPdf(true)}>📄 Cargar PDF</button>
                 <GalaxyBtn onClick={() => { setEditandoCurso(null); setModalCurso(true); }}>+ Agregar curso</GalaxyBtn>
               </div>
             </div>
@@ -337,6 +606,32 @@ export default function ProgresoPage() {
             })
           )
         }
+
+        <div
+  style={{
+    display: "flex",
+    justifyContent: "center",
+    margin: "1.5rem 0"
+  }}
+>
+  <GalaxyBtn
+    onClick={() => {
+      setEditandoCurso(null);
+      setFormCurso({
+        sigla: "",
+        nombre: "",
+        creditos: "",
+        anio: 1,
+        semestre: "I",
+        estado: "pendiente",
+        nota: ""
+      });
+      setModalCurso(true);
+    }}
+  >
+    + Agregar curso
+  </GalaxyBtn>
+</div>
 
         {/* Tabla de promedios anuales */}
         {
