@@ -9,7 +9,7 @@ export default function HomePage() {
   const { user, loading } = useAuth();
   const router = useRouter();
 
-  // Si ya está logueado, redirigir al dashboard
+ 
   useEffect(() => {
     if (!loading && user) router.replace("/dashboard");
   }, [user, loading, router]);

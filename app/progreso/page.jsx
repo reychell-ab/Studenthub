@@ -412,7 +412,7 @@ const pct =
           margin: 0,
           fontSize: "1.1rem",
           fontWeight: 700,
-          color: "#0f172a"
+          color: "var(--text-primary)"
         }}
       >
         🎓 Perfil Académico
@@ -421,7 +421,7 @@ const pct =
       <p
         style={{
           marginTop: 4,
-          color: "#64748b",
+          color: "var(--text-secondary)",
           fontSize: "0.875rem"
         }}
       >
@@ -489,7 +489,7 @@ const pct =
         {/* Barra de progreso */}
         <div className="card" style={{ marginBottom: "1rem", padding: "1rem 1.25rem" }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: "0.875rem" }}>
-            <span style={{ color: "#64748b" }}>{credAprobados} créditos aprobados</span>
+            <span style={{ color: "var(--text-secondary)" }}>{credAprobados} créditos aprobados</span>
             <span style={{ fontWeight: 700, color: "#7c3aed" }}>{pct}%</span>
           </div>
           <div className="progress-bar" style={{ height: 12 }}>
@@ -499,7 +499,7 @@ const pct =
 
         {/* Filtro por año */}
         <div style={{ display: "flex", gap: 6, marginBottom: "1rem", flexWrap: "wrap", alignItems: "center" }}>
-          <span style={{ fontSize: "0.8125rem", color: "#64748b", fontWeight: 600 }}>Ver:</span>
+          <span style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", fontWeight: 600 }}>Ver:</span>
           <button className={`btn btn-sm ${verAnio === "todos" ? "btn-primary" : "btn-ghost"}`} onClick={() => setVerAnio("todos")}>Todos</button>
           {anios.map(a => (
             <button key={a} className={`btn btn-sm ${verAnio === a ? "btn-primary" : "btn-ghost"}`} onClick={() => setVerAnio(a)}>Año {a}</button>
@@ -511,8 +511,8 @@ const pct =
           todosCursos.length === 0 ? (
             <div className="card" style={{ textAlign: "center", padding: "3rem" }}>
               <div style={{ fontSize: "3rem", marginBottom: "0.75rem" }}>📄</div>
-              <div style={{ fontWeight: 700, fontSize: "1.125rem", color: "#0f172a", marginBottom: 4 }}>Sin plan de estudios</div>
-              <p style={{ color: "#64748b", fontSize: "0.875rem", marginBottom: "1.25rem" }}>
+              <div style={{ fontWeight: 700, fontSize: "1.125rem", color: "var(--text-primary)", marginBottom: 4 }}>Sin plan de estudios</div>
+              <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem", marginBottom: "1.25rem" }}>
             Aún no has creado tu plan académico.
 Empieza agregando cursos para visualizar tu progreso,
 créditos completados y estadísticas de rendimiento.
@@ -558,7 +558,7 @@ créditos completados y estadísticas de rendimiento.
                         return (
                           <tr key={idx}>
 
-                            <td style={{ fontFamily: "monospace", fontSize: "0.8125rem", color: "#475569" }}>{curso.sigla || "—"}</td>
+                            <td style={{ fontFamily: "monospace", fontSize: "0.8125rem", color: "var(--text-secondary)" }}>{curso.sigla || "—"}</td>
                             <td style={{ fontWeight: isAprobado ? 600 : 400 }}>{curso.nombre}</td>
                             <td style={{ textAlign: "center", fontWeight: 600 }}>{curso.creditos}</td>
                             <td>
@@ -653,7 +653,7 @@ créditos completados y estadísticas de rendimiento.
                     return (
                       <tr key={anio}>
                         <td style={{ fontWeight: 700 }}>Año {anio}</td>
-                        <td style={{ color: "#64748b" }}>{ciclosAnio.map(c => `Ciclo ${c}`).join(", ")}</td>
+                        <td style={{ color: "var(--text-secondary)" }}>{ciclosAnio.map(c => `Ciclo ${c}`).join(", ")}</td>
                         <td>{aprobDelAnio.length} / {delAnio.length}</td>
                         <td>{credsAnio}</td>
                         <td style={{ fontWeight: 800, fontSize: "1.125rem", color: prom === null ? "#94a3b8" : prom >= 7 ? "#16a34a" : "#dc2626" }}>

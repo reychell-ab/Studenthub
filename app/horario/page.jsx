@@ -10,7 +10,6 @@ import GalaxyBtn from "../../components/GalaxyBtn";
 import PageLoader from "../../components/PageLoader";
 import Sidebar from "../../components/Sidebar";
 
-// ── Constantes ───────────────────────────────────────────
 const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 const DIAS_CORTO = ["L", "K", "M", "J", "V", "S"];
 const HORA_INICIO = 7;   // 7:00 AM
@@ -36,7 +35,7 @@ const COLORES = [
   { id:"slate",    bg:"#475569", light:"#f1f5f9", text:"#334155" },
 ];
 
-// ── Utilidades ───────────────────────────────────────────
+
 function horaAMinutos(hora) {
   const [h, m] = hora.split(":").map(Number);
   return h * 60 + (m || 0);
@@ -87,7 +86,7 @@ function generarHorasFin() {
   return opts;
 }
 
-// ── Componente principal ─────────────────────────────────
+
 export default function HorarioPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
@@ -174,11 +173,11 @@ export default function HorarioPage() {
   const capturarGrid = async () => {
     const html2canvas = (await import("html2canvas")).default;
     const el = calendarRef.current;
-    // Temporarily remove scroll restriction so full grid renders
+  
     const scrollDiv = el.querySelector("#grid-scroll");
     const prevMax = scrollDiv ? scrollDiv.style.maxHeight : null;
     if (scrollDiv) scrollDiv.style.maxHeight = "none";
-    await new Promise(r => setTimeout(r, 80)); // let layout settle
+    await new Promise(r => setTimeout(r, 80));
     const canvas = await html2canvas(el, {
       scale: 2,
       useCORS: true,
@@ -228,7 +227,7 @@ export default function HorarioPage() {
     setDescargando(false);
   };
 
-  // Bloques por día
+
   function entradasDelDia(diaIdx) {
     const dia = DIAS[diaIdx];
     return entradas.filter(e => e.dias?.includes(dia));
@@ -300,14 +299,14 @@ export default function HorarioPage() {
 
         {/* Calendario semanal */}
         <div ref={calendarRef} className="card" style={{ padding:0, overflow:"hidden" }}>
-          <div style={{ display:"grid", gridTemplateColumns:`56px repeat(${DIAS.length}, 1fr)`, borderBottom:"1px solid #e2e8f0" }}>
+          <div style={{ display:"grid", gridTemplateColumns:`56px repeat(${DIAS.length}, 1fr)`, borderBottom:"1px solid var(--color-border)" }}>
             {/* Celda vacía esquina */}
-            <div style={{ padding:"0.75rem 0", borderRight:"1px solid #e2e8f0" }} />
+            <div style={{ padding:"0.75rem 0", borderRight:"1px solid var(--color-border)" }} />
             {/* Encabezados de días */}
             {DIAS.map((dia, i) => (
-              <div key={dia} style={{ padding:"0.75rem 0.5rem", textAlign:"center", borderRight: i < DIAS.length-1 ? "1px solid #e2e8f0" : "none" }}>
-                <div style={{ fontSize:"0.75rem", fontWeight:700, color:"#64748b", letterSpacing:"0.05em" }}>{DIAS_CORTO[i]}</div>
-                <div style={{ fontSize:"0.8125rem", color:"#0f172a", fontWeight:500 }}>{dia}</div>
+              <div key={dia} style={{ padding:"0.75rem 0.5rem", textAlign:"center", borderRight: i < DIAS.length-1 ? "1px solid var(--color-border)" : "none" }}>
+                <div style={{ fontSize:"0.75rem", fontWeight:700, color:"var(--text-muted)", letterSpacing:"0.05em" }}>{DIAS_CORTO[i]}</div>
+                <div style={{ fontSize:"0.8125rem", color:"var(--text-primary)", fontWeight:600 }}>{dia}</div>
               </div>
             ))}
           </div>
@@ -317,9 +316,9 @@ export default function HorarioPage() {
             <div ref={gridRef} style={{ display:"grid", gridTemplateColumns:`56px repeat(${DIAS.length}, 1fr)`, position:"relative" }}>
 
               {/* Columna de horas */}
-              <div style={{ borderRight:"1px solid #e2e8f0" }}>
+              <div style={{ borderRight:"1px solid var(--color-border)" }}>
                 {horasGrid.map(h => (
-                  <div key={h} style={{ height:SLOT_H, borderBottom:"1px solid #f1f5f9", padding:"4px 6px 0", display:"flex", alignItems:"flex-start", justifyContent:"flex-end" }}>
+                  <div key={h} style={{ height:SLOT_H, borderBottom:"1px solid var(--color-border)", padding:"4px 6px 0", display:"flex", alignItems:"flex-start", justifyContent:"flex-end" }}>
                     <span style={{ fontSize:"0.7rem", color:"#94a3b8", fontWeight:500 }}>{h}</span>
                   </div>
                 ))}
@@ -329,10 +328,10 @@ export default function HorarioPage() {
               {DIAS.map((dia, diaIdx) => {
                 const bloques = entradasDelDia(diaIdx);
                 return (
-                  <div key={dia} style={{ position:"relative", borderRight: diaIdx < DIAS.length-1 ? "1px solid #e2e8f0" : "none" }}>
+                  <div key={dia} style={{ position:"relative", borderRight: diaIdx < DIAS.length-1 ? "1px solid var(--color-border)" : "none" }}>
                     {/* Líneas de hora */}
                     {horasGrid.map(h => (
-                      <div key={h} style={{ height:SLOT_H, borderBottom:"1px solid #f1f5f9" }} />
+                      <div key={h} style={{ height:SLOT_H, borderBottom:"1px solid var(--color-border)" }} />
                     ))}
 
                     {/* Bloques de cursos */}
@@ -399,7 +398,7 @@ export default function HorarioPage() {
                           <span style={{ fontWeight:600 }}>{e.nombre}</span>
                         </div>
                       </td>
-                      <td style={{ color:"#64748b" }}>{e.aula || "—"}</td>
+                      <td style={{ color:"var(--text-secondary)" }}>{e.aula || "—"}</td>
                       <td>
                         <div style={{ display:"flex", gap:3, flexWrap:"wrap" }}>
                           {DIAS_CORTO.map((d, i) => (
@@ -407,7 +406,7 @@ export default function HorarioPage() {
                               width:22, height:22, borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center",
                               fontSize:"0.7rem", fontWeight:700,
                               background: e.dias?.includes(DIAS[i]) ? c.bg : "#f1f5f9",
-                              color: e.dias?.includes(DIAS[i]) ? "white" : "#94a3b8"
+                              color: e.dias?.includes(DIAS[i]) ? "white" : "#64748b"
                             }}>{d}</span>
                           ))}
                         </div>
@@ -431,8 +430,8 @@ export default function HorarioPage() {
         {entradas.length === 0 && (
           <div className="card" style={{ marginTop:"1rem", textAlign:"center", padding:"3rem" }}>
             <div style={{ fontSize:"3rem", marginBottom:"0.75rem" }}>🗓️</div>
-            <div style={{ fontWeight:700, fontSize:"1.125rem", color:"#0f172a", marginBottom:4 }}>Tu horario está vacío</div>
-            <p style={{ color:"#64748b", fontSize:"0.875rem", marginBottom:"1.25rem" }}>Agregá tus cursos para visualizar tu semana</p>
+            <div style={{ fontWeight:700, fontSize:"1.125rem", color:"var(--text-primary)", marginBottom:4 }}>Tu horario está vacío</div>
+            <p style={{ color:"var(--text-secondary)", fontSize:"0.875rem", marginBottom:"1.25rem" }}>Agregá tus cursos para visualizar tu semana</p>
             <GalaxyBtn onClick={abrirAgregar}>+ Agregar primer curso</GalaxyBtn>
           </div>
         )}

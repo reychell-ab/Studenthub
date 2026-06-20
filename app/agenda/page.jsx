@@ -1,11 +1,13 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../lib/authContext";
-import { agregarActividad, obtenerAgenda, eliminarActividad, actualizarActividad } from "../../lib/db";
+import { agregarActividad, obtenerAgenda, eliminarActividad, actualizarActividad, obtenerHorario } from "../../lib/db";
+import { obtenerSugerenciasIA } from "../../lib/aiService";
 import Sidebar from "../../components/Sidebar";
 import GalaxyBtn from "../../components/GalaxyBtn";
 import PageLoader from "../../components/PageLoader";
+import SugerenciasIA from "../../components/SugerenciasIA";
 
 const TIPOS = ["tarea","examen","proyecto","laboratorio","otro"];
 const TIPO_COLOR = { tarea:"#2563eb", examen:"#dc2626", proyecto:"#7c3aed", laboratorio:"#16a34a", otro:"#64748b" };
@@ -26,22 +28,109 @@ export default function AgendaPage() {
   const [guardando, setGuardando] = useState(false);
   const [msg, setMsg] = useState(null);
   const [busqueda, setBusqueda] = useState("");
+  const [horario, setHorario] = useState([]);
   const dragItem = useRef(null);
   const dragOverCol = useRef(null);
+
+  // ── IA: sugerencias + panel + confirmación de agendado ────────────────
+  const [panelIA, setPanelIA] = useState(false);
+  const [sugerenciasIA, setSugerenciasIA] = useState(null);
+  const [cargandoIA, setCargandoIA] = useState(false);
+  const [errorIA, setErrorIA] = useState(null);
+  const [sinDatosIA, setSinDatosIA] = useState(false);
+  const [confirmando, setConfirmando] = useState(false);
+  const [seleccionIA, setSeleccionIA] = useState({});
+  const [agendandoIA, setAgendandoIA] = useState(false);
 
   useEffect(() => { if (!loading && !user) router.replace("/login"); }, [user, loading, router]);
   useEffect(() => {
     if (!user) return;
-    obtenerAgenda(user.uid).then(a => {
+    Promise.all([obtenerAgenda(user.uid), obtenerHorario(user.uid)]).then(([a, h]) => {
       // Migrar actividades viejas que no tienen columna
       const migradas = a.map(act => ({
         ...act,
         columna: act.columna || (act.completada ? "realizado" : "pendiente")
       }));
       setActividades(migradas);
+      setHorario(h || []);
       setCargando(false);
     });
   }, [user]);
+
+  // ── Consultar IA combinando agenda + horario académico ─────────────────
+  const consultarIA = useCallback(async (actsActuales, horarioActual) => {
+    const pendientes = actsActuales.filter(a => a.columna !== "realizado" && a.fecha);
+
+    if (pendientes.length === 0) {
+      setSinDatosIA(true);
+      setSugerenciasIA([]);
+      setErrorIA(null);
+      return;
+    }
+
+    setSinDatosIA(false);
+    setCargandoIA(true);
+    setErrorIA(null);
+    try {
+      const data = await obtenerSugerenciasIA({ actividades: pendientes, horario: horarioActual });
+      setSugerenciasIA(data.sugerencias || []);
+      setSinDatosIA(!!data.sinDatos);
+      // Por defecto, todas las sugerencias quedan seleccionadas para agendar
+      const sel = {};
+      (data.sugerencias || []).forEach(s => { sel[s.id] = true; });
+      setSeleccionIA(sel);
+    } catch (err) {
+      setErrorIA(err.message || "No se pudieron generar sugerencias.");
+      setSugerenciasIA(null);
+    } finally {
+      setCargandoIA(false);
+    }
+  }, []);
+
+  const abrirPanelIA = () => {
+    setPanelIA(true);
+    if (sugerenciasIA === null && !cargandoIA) {
+      consultarIA(actividades, horario);
+    }
+  };
+
+  // Al pulsar "Agendar sugerencias" dentro del panel: abrir confirmación
+  const handleAgendarClick = () => setConfirmando(true);
+
+  const toggleSeleccion = (id) => setSeleccionIA(prev => ({ ...prev, [id]: !prev[id] }));
+
+  // Crear bloques reales en la agenda para las sugerencias confirmadas
+  const confirmarAgendado = async () => {
+    const aCrear = (sugerenciasIA || []).filter(s => seleccionIA[s.id]);
+    if (aCrear.length === 0) { setConfirmando(false); return; }
+
+    setAgendandoIA(true);
+    try {
+      const nuevasActividades = [];
+      for (const s of aCrear) {
+        const original = actividades.find(a => a.id === s.id);
+        const datos = {
+          titulo: `Iniciar: ${s.titulo}`,
+          curso: s.curso || original?.curso || "",
+          fecha: s.fechaSugerida,
+          tipo: original?.tipo || "tarea",
+          descripcion: s.razon || "",
+          columna: "pendiente",
+          completada: false,
+        };
+        const ref = await agregarActividad(user.uid, datos);
+        nuevasActividades.push({ id: ref.id, ...datos });
+      }
+      setActividades(prev => [...prev, ...nuevasActividades]);
+      setMsg({ tipo: "success", texto: `${nuevasActividades.length} bloque(s) agendado(s) correctamente.` });
+      setTimeout(() => setMsg(null), 3500);
+      setConfirmando(false);
+      setPanelIA(false);
+    } catch (err) {
+      setMsg({ tipo: "error", texto: "No se pudieron agendar las sugerencias." });
+    }
+    setAgendandoIA(false);
+  };
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const hoy = new Date().toISOString().split("T")[0];
@@ -123,10 +212,10 @@ export default function AgendaPage() {
         {/* Header */}
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"1rem", flexWrap:"wrap", gap:8 }}>
           <div>
-            <h2 style={{ fontSize:"1.5rem", fontWeight:700, color:"#0f172a" }}>📅 Agenda Académica</h2>
-            <p style={{ fontSize:"0.875rem", color:"#64748b", marginTop:2 }}>
+            <h2 style={{ fontSize:"1.5rem", fontWeight:700, color:"var(--text-primary)" }}>📅 Agenda Académica</h2>
+            <p style={{ fontSize:"0.875rem", color:"var(--text-secondary)", marginTop:2 }}>
               {actividades.filter(a=>a.columna==="pendiente").length} pendientes · {actividades.filter(a=>a.columna==="en_curso").length} en curso · {actividades.filter(a=>a.columna==="realizado").length} realizadas
-              {vencidas > 0 && <span style={{ color:"#dc2626", marginLeft:8 }}>· ⚠️ {vencidas} vencidas</span>}
+              {vencidas > 0 && <span style={{ color:"#f87171", marginLeft:8 }}>· ⚠️ {vencidas} vencidas</span>}
             </p>
           </div>
           <div style={{ display:"flex", gap:8, alignItems:"center" }}>
@@ -135,6 +224,13 @@ export default function AgendaPage() {
               value={busqueda} onChange={e => setBusqueda(e.target.value)}
               style={{ padding:"0.5rem 0.75rem", border:"1px solid #e2e8f0", borderRadius:8, fontSize:"0.875rem", outline:"none", width:180 }}
             />
+            <button
+              onClick={abrirPanelIA}
+              className="btn btn-ghost btn-sm"
+              style={{ display:"flex", alignItems:"center", gap:6, borderColor:"rgba(167,139,250,0.4)", color:"#c4b5fd" }}
+            >
+              ✨ Sugerencias IA
+            </button>
             <GalaxyBtn onClick={() => abrirNueva()}>+ Nueva</GalaxyBtn>
           </div>
         </div>
@@ -289,6 +385,57 @@ export default function AgendaPage() {
                   <button type="submit" className="btn btn-primary" disabled={guardando}>{guardando?"Guardando...":editando?"Actualizar":"Agregar"}</button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* Panel IA Sugiere */}
+        {panelIA && (
+          <div className="modal-overlay" onClick={e => e.target===e.currentTarget && !confirmando && setPanelIA(false)}>
+            <div className="modal-box" style={{ maxWidth:560, background:"transparent", border:"none", boxShadow:"none", padding:0 }}>
+              <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:8 }}>
+                <button onClick={() => setPanelIA(false)} className="btn btn-ghost btn-sm" style={{ background:"rgba(255,255,255,0.1)", color:"white", border:"1px solid rgba(255,255,255,0.2)" }}>✕ Cerrar</button>
+              </div>
+              <SugerenciasIA
+                sugerencias={sugerenciasIA}
+                cargandoIA={cargandoIA}
+                error={errorIA}
+                sinDatos={sinDatosIA}
+                onReintentar={() => consultarIA(actividades, horario)}
+                onAgendar={handleAgendarClick}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Confirmar agendado de sugerencias */}
+        {confirmando && (
+          <div className="modal-overlay" onClick={e => e.target===e.currentTarget && setConfirmando(false)}>
+            <div className="modal-box" style={{ maxWidth:480 }}>
+              <div className="modal-header">
+                <h3>Confirmar bloques sugeridos</h3>
+                <button className="btn btn-ghost btn-sm" onClick={() => setConfirmando(false)}>✕</button>
+              </div>
+              <p style={{ fontSize:"0.8125rem", color:"var(--text-secondary)", marginBottom:"1rem" }}>
+                Se crearán recordatorios en tu agenda (columna Pendiente) en las fechas sugeridas. Desmarcá los que no querés agregar.
+              </p>
+              <div style={{ display:"flex", flexDirection:"column", gap:"0.5rem", marginBottom:"1.25rem", maxHeight:300, overflowY:"auto" }}>
+                {(sugerenciasIA || []).map(s => (
+                  <label key={s.id} style={{ display:"flex", alignItems:"flex-start", gap:8, padding:"0.625rem 0.75rem", background:"var(--color-card-alt)", borderRadius:10, cursor:"pointer" }}>
+                    <input type="checkbox" checked={!!seleccionIA[s.id]} onChange={() => toggleSeleccion(s.id)} style={{ marginTop:3 }} />
+                    <div>
+                      <div style={{ fontWeight:600, fontSize:"0.8125rem", color:"var(--text-primary)" }}>{s.titulo}</div>
+                      <div style={{ fontSize:"0.72rem", color:"var(--text-muted)", marginTop:2 }}>Iniciar: {s.fechaSugerida}{s.curso ? ` · ${s.curso}` : ""}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+              <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setConfirmando(false)}>Cancelar</button>
+                <GalaxyBtn onClick={confirmarAgendado} disabled={agendandoIA}>
+                  {agendandoIA ? "Agendando..." : "Confirmar y agendar"}
+                </GalaxyBtn>
+              </div>
             </div>
           </div>
         )}

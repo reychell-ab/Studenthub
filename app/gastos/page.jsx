@@ -1,8 +1,9 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../lib/authContext";
 import { agregarGasto, obtenerGastos, eliminarGasto } from "../../lib/db";
+import { obtenerResumenFinancieroIA } from "../../lib/aiService";
 import GalaxyBtn from "../../components/GalaxyBtn";
 import PageLoader from "../../components/PageLoader";
 import Sidebar from "../../components/Sidebar";
@@ -37,6 +38,10 @@ export default function GastosPage() {
   const [form, setForm] = useState({ tipo:"egreso", descripcion:"", monto:"", categoria:"Alimentación", nota:"" });
   const [guardando, setGuardando] = useState(false);
   const [msg, setMsg] = useState(null);
+
+  // ── Resumen inteligente (IA) ───────────────────────────────────────────
+  const [resumenIA, setResumenIA] = useState(null);   
+  const [errorIA, setErrorIA] = useState(null);
 
   useEffect(() => { if (!loading && !user) router.replace("/login"); }, [user, loading, router]);
 
@@ -81,6 +86,36 @@ export default function GastosPage() {
   const disponible = ingresos - egresos;
   const categoriasTop = agruparPorCategoria(gastos);
 
+  // ── Resumen inteligente (IA) ───────────────────────────────────────────
+  const cargarResumenIA = useCallback(async () => {
+    if (gastos.length === 0) return;
+    setCargandoIA(true);
+    setErrorIA(null);
+    try {
+      const ultimosMovimientos = [...gastos]
+        .sort((a, b) => (b.fecha?.seconds || 0) - (a.fecha?.seconds || 0))
+        .slice(0, 8);
+      const data = await obtenerResumenFinancieroIA({
+        ingresos, egresos, disponible,
+        porCategoria: categoriasTop,
+        ultimosMovimientos,
+      });
+      setResumenIA(data);
+    } catch (err) {
+      setErrorIA(err.message || "No se pudo generar el resumen financiero.");
+      setResumenIA(null);
+    } finally {
+      setCargandoIA(false);
+    }
+  }, [gastos, ingresos, egresos, disponible, categoriasTop]);
+
+  useEffect(() => {
+    if (!cargando && gastos.length > 0 && resumenIA === null && !cargandoIA) {
+      cargarResumenIA();
+    }
+
+  }, [cargando, gastos.length]);
+
   if (loading || cargando) return <PageLoader />;
 
   return (
@@ -119,6 +154,82 @@ export default function GastosPage() {
           </div>
         </div>
 
+        {/* ── Resumen inteligente (IA) ── */}
+        <div style={{
+          background: "linear-gradient(135deg, #1e1b4b 0%, #312e81 60%, #4338ca 100%)",
+          borderRadius: 20, padding: "1.5rem", marginBottom: "1.25rem",
+          position: "relative", overflow: "hidden", boxShadow: "0 4px 24px rgba(99,102,241,0.25)",
+        }}>
+          <div style={{ position:"absolute", top:-40, right:-40, width:160, height:160, borderRadius:"50%", background:"rgba(167,139,250,0.12)", pointerEvents:"none" }} />
+
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"1rem", position:"relative" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:"0.6rem" }}>
+              <div style={{ background:"rgba(167,139,250,0.25)", borderRadius:10, padding:"6px 8px", display:"flex", color:"#c4b5fd" }}>
+                <span style={{ fontSize:"1rem" }}>🧠</span>
+              </div>
+              <div>
+                <span style={{ fontWeight:800, color:"white", fontSize:"1rem", display:"block", lineHeight:1.2 }}>Resumen inteligente</span>
+                <span style={{ fontSize:"0.7rem", color:"#a5b4fc", fontWeight:500 }}>Análisis de tus finanzas con IA</span>
+              </div>
+            </div>
+            {gastos.length > 0 && (
+              <button
+                onClick={cargarResumenIA}
+                disabled={cargandoIA}
+                style={{
+                  background:"rgba(255,255,255,0.1)", border:"1px solid rgba(255,255,255,0.18)",
+                  borderRadius:10, padding:"0.4rem 0.85rem", color:"#c4b5fd", fontSize:"0.75rem",
+                  fontWeight:600, cursor: cargandoIA ? "not-allowed" : "pointer", opacity: cargandoIA ? 0.6 : 1,
+                  display:"flex", alignItems:"center", gap:6,
+                }}
+              >
+                🔄 {cargandoIA ? "Analizando..." : "Actualizar"}
+              </button>
+            )}
+          </div>
+
+          {gastos.length === 0 ? (
+            <div style={{ textAlign:"center", padding:"1rem 0", color:"#a5b4fc", fontSize:"0.875rem" }}>
+              Registrá tus primeros movimientos para que la IA pueda analizar tus finanzas.
+            </div>
+          ) : cargandoIA ? (
+            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", padding:"1.5rem 0", gap:"0.75rem" }}>
+              <div style={{ width:32, height:32, borderRadius:"50%", border:"3px solid rgba(167,139,250,0.3)", borderTop:"3px solid #a78bfa", animation:"spin 0.8s linear infinite" }} />
+              <span style={{ color:"#c4b5fd", fontSize:"0.82rem" }}>Analizando tus movimientos…</span>
+              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            </div>
+          ) : errorIA ? (
+            <div style={{ textAlign:"center", padding:"1rem 0" }}>
+              <div style={{ color:"#fecaca", fontSize:"0.82rem", marginBottom:"0.75rem", lineHeight:1.5 }}>{errorIA}</div>
+              <button onClick={cargarResumenIA} style={{ background:"rgba(255,255,255,0.1)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:10, padding:"0.45rem 1rem", color:"white", fontSize:"0.78rem", fontWeight:600, cursor:"pointer" }}>
+                Reintentar
+              </button>
+            </div>
+          ) : resumenIA ? (
+            <div>
+              {resumenIA.resumen && (
+                <p style={{ fontSize:"0.85rem", color:"#ddd6fe", lineHeight:1.6, marginBottom: resumenIA.tips?.length ? "0.85rem" : 0 }}>
+                  {resumenIA.resumen}
+                </p>
+              )}
+              {resumenIA.tips?.length > 0 && (
+                <div style={{ display:"flex", flexDirection:"column", gap:"0.5rem" }}>
+                  {resumenIA.tips.map((tip, i) => (
+                    <div key={i} style={{ display:"flex", gap:8, alignItems:"flex-start", background:"rgba(255,255,255,0.07)", borderRadius:10, padding:"0.55rem 0.75rem" }}>
+                      <span style={{ color:"#c4b5fd", flexShrink:0 }}>💡</span>
+                      <span style={{ fontSize:"0.78rem", color:"#e0e7ff", lineHeight:1.5 }}>{tip}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={{ textAlign:"center", padding:"1rem 0", color:"#a5b4fc", fontSize:"0.875rem" }}>
+              Preparando tu análisis…
+            </div>
+          )}
+        </div>
+
         {/* Categorías top + tabla */}
         <div style={{ display:"grid", gridTemplateColumns:"1fr 2fr", gap:"1rem" }}>
           <div className="card">
@@ -130,8 +241,8 @@ export default function GastosPage() {
               return (
                 <div key={cat} style={{ marginBottom:"0.75rem" }}>
                   <div style={{ display:"flex", justifyContent:"space-between", fontSize:"0.8125rem", marginBottom:4 }}>
-                    <span style={{ color:"#374151", fontWeight:500 }}>{cat}</span>
-                    <span style={{ color:"#64748b" }}>{pct}% · ₡{total.toLocaleString()}</span>
+                    <span style={{ color:"var(--text-primary)", fontWeight:500 }}>{cat}</span>
+                    <span style={{ color:"var(--text-secondary)" }}>{pct}% · ₡{total.toLocaleString()}</span>
                   </div>
                   <div className="progress-bar">
                     <div className="progress-fill" style={{ width:`${pct}%`, background:"#2563eb" }} />

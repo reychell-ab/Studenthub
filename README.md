@@ -28,49 +28,13 @@ Aplicación web de organización académica y financiera para estudiantes univer
 ```bash
 npm install
 ```
-
-### 3. Configurar Firebase
-
-1. Ve a [Firebase Console](https://console.firebase.google.com)
-2. Crea un proyecto nuevo
-3. Activa **Authentication → Email/Password**
-4. Activa **Firestore Database** (modo producción o test)
-5. Ve a **Project Settings → General → Your apps → Web app**
-6. Copia tu configuración en `lib/firebase.js`:
-
-```js
-const firebaseConfig = {
-  apiKey: "TU_API_KEY",
-  authDomain: "TU_PROJECT.firebaseapp.com",
-  projectId: "TU_PROJECT_ID",
-  storageBucket: "TU_PROJECT.appspot.com",
-  messagingSenderId: "TU_SENDER_ID",
-  appId: "TU_APP_ID"
-};
-```
-
-### 4. Reglas de Firestore
-
-En Firebase Console → Firestore → Rules, pega esto:
-
-```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /usuarios/{userId}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-    }
-  }
-}
-```
-
-### 5. Ejecutar en desarrollo
+### 2. Ejecutar en desarrollo
 ```bash
 npm run dev
 ```
 Abre [http://localhost:3000](http://localhost:3000)
 
-### 6. Construir para producción
+### 3. Construir para producción
 ```bash
 npm run build
 npm start
@@ -128,43 +92,3 @@ studenthub/
 
 
 ---
-
-## 🚂 Deploy en Railway
-
-### 1. Subir el código a GitHub
-```bash
-git init
-git add .
-git commit -m "initial commit"
-git branch -M main
-git remote add origin https://github.com/TU_USUARIO/studenthub.git
-git push -u origin main
-```
-
-### 2. Crear proyecto en Railway
-1. Ve a [railway.app](https://railway.app) → **New Project → Deploy from GitHub repo**
-2. Seleccioná tu repositorio `studenthub`
-3. Railway detecta Next.js automáticamente
-
-### 3. Agregar variables de entorno en Railway
-Ve a tu proyecto → **Variables** → agrega cada una:
-
-| Variable | Valor |
-|----------|-------|
-| `NEXT_PUBLIC_FIREBASE_API_KEY` | Tu API Key de Firebase |
-| `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` | `tu-proyecto.firebaseapp.com` |
-| `NEXT_PUBLIC_FIREBASE_PROJECT_ID` | `tu-proyecto-id` |
-| `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET` | `tu-proyecto.appspot.com` |
-| `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID` | Tu Sender ID |
-| `NEXT_PUBLIC_FIREBASE_APP_ID` | Tu App ID |
-
-### 4. Configurar Firebase para producción
-En Firebase Console → Authentication → **Authorized domains**, agrega el dominio que te da Railway (ej: `studenthub-production.up.railway.app`).
-
-### 5. Deploy automático
-Cada `git push` a `main` dispara un redeploy automático en Railway.
-
-### Notas
-- El archivo `.env.local` **nunca** se sube a GitHub (está en `.gitignore`)
-- Las variables `NEXT_PUBLIC_*` son visibles en el navegador — no pongas secretos privados ahí
-- Railway asigna un dominio gratis en `.up.railway.app`

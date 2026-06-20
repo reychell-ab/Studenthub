@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "../lib/authContext";
 import { obtenerPerfil } from "../lib/db";
+import EditarPerfilModal from "./EditarPerfilModal";
 
 const NAV = [
   { href: "/dashboard", label: "Inicio" },
@@ -18,17 +19,28 @@ export default function Sidebar({ onEditarPerfil }) {
   const { user, logout } = useAuth();
   const [menuPerfil, setMenuPerfil] = useState(false);
   const [perfil, setPerfil] = useState(null);
+  const [modalGlobal, setModalGlobal] = useState(false);
 
- useEffect(() => {
-  async function cargarPerfil() {
+  const cargarPerfil = async () => {
     if (!user?.uid) return;
-
     const datos = await obtenerPerfil(user.uid);
     setPerfil(datos);
-  }
+  };
 
+ useEffect(() => {
   cargarPerfil();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
 }, [user]);
+
+  // Si la página actual (ej. Progreso) pasa su propio manejador de edición,
+  // lo respetamos. Si no, abrimos el modal funcional genérico de aquí mismo,
+  // así "Editar perfil" funciona en TODAS las páginas sin necesitar que cada
+  // una lo implemente por separado.
+  const handleEditarPerfil = () => {
+    setMenuPerfil(false);
+    if (onEditarPerfil) onEditarPerfil();
+    else setModalGlobal(true);
+  };
 
   
   return (
@@ -166,7 +178,7 @@ export default function Sidebar({ onEditarPerfil }) {
 )}
 
 <button
-  onClick={onEditarPerfil}
+  onClick={handleEditarPerfil}
   className="btn btn-primary btn-sm"
   style={{
     width: "100%",
@@ -191,6 +203,11 @@ export default function Sidebar({ onEditarPerfil }) {
   )}
 
 </div>
+
+      <EditarPerfilModal
+        open={modalGlobal}
+        onClose={() => { setModalGlobal(false); cargarPerfil(); }}
+      />
     </aside>
   );
 }
