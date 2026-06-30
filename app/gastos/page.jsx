@@ -39,10 +39,10 @@ export default function GastosPage() {
   const [guardando, setGuardando] = useState(false);
   const [msg, setMsg] = useState(null);
 
-  // ── Resumen inteligente (IA) ───────────────────────────────────────────
-  const [resumenIA, setResumenIA] = useState(null);   
-  const [errorIA, setErrorIA] = useState(null);
-
+// ── Resumen inteligente (IA) ───────────────────────────────────────────
+const [resumenIA, setResumenIA] = useState(null);
+const [errorIA, setErrorIA] = useState(null);
+const [cargandoIA, setCargandoIA] = useState(false);
   useEffect(() => { if (!loading && !user) router.replace("/login"); }, [user, loading, router]);
 
   useEffect(() => {
