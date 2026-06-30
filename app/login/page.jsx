@@ -1,4 +1,3 @@
-
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -6,7 +5,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   updateProfile,
-  signInWithPopup
+  signInWithRedirect
 } from "firebase/auth";
 import { auth, googleProvider } from "../../lib/firebase";
 
@@ -28,11 +27,7 @@ export default function LoginPage() {
       setError("");
       setLoading(true);
 
-      const result = await signInWithPopup(auth, googleProvider);
-
-      console.log("Usuario:", result.user);
-
-      router.push("/dashboard");
+      await signInWithRedirect(auth, googleProvider);
     } catch (err) {
       console.error(err);
 
@@ -46,9 +41,8 @@ export default function LoginPage() {
       };
 
       setError(msgs[err.code] || "Error al iniciar sesión con Google.");
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   const handleSubmit = async (e) => {
@@ -245,4 +239,3 @@ export default function LoginPage() {
     </div>
   );
 }
-
