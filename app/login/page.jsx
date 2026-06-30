@@ -1,17 +1,27 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   updateProfile,
-  signInWithRedirect
+  signInWithPopup
 } from "firebase/auth";
 import { auth, googleProvider } from "../../lib/firebase";
+import { useAuth } from "../../lib/authContext";
 
 export default function LoginPage() {
   const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
   const [mode, setMode] = useState("login");
+
+  // Si el usuario ya está autenticado (por correo o por Google),
+  // lo mandamos directo al dashboard en lugar de dejarlo en /login.
+  useEffect(() => {
+    if (!authLoading && user) {
+      router.replace("/dashboard");
+    }
+  }, [user, authLoading, router]);
   const [form, setForm] = useState({
     nombre: "",
     email: "",
@@ -27,13 +37,20 @@ export default function LoginPage() {
       setError("");
       setLoading(true);
 
-      await signInWithRedirect(auth, googleProvider);
+      await signInWithPopup(auth, googleProvider);
+      router.push("/dashboard");
     } catch (err) {
       console.error(err);
 
       const msgs = {
         "auth/popup-closed-by-user":
           "Se cerró la ventana de Google antes de completar el inicio de sesión.",
+        "auth/cancelled-popup-request":
+          "Se canceló el inicio de sesión. Intenta de nuevo.",
+        "auth/popup-blocked":
+          "El navegador bloqueó la ventana de Google. Permite las ventanas emergentes e intenta de nuevo.",
+        "auth/unauthorized-domain":
+          "Este dominio no está autorizado en Firebase. Agrégalo en Authentication → Settings → Authorized domains.",
         "auth/network-request-failed":
           "Error de conexión. Verifica tu internet.",
         "auth/too-many-requests":
