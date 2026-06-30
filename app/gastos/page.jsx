@@ -124,7 +124,7 @@ const [cargandoIA, setCargandoIA] = useState(false);
       <main className="main-content">
         <div className="flex-between page-header">
           <div>
-            <h2>💰 Control de Gastos</h2>
+            <h2>Control de Gastos</h2>
             <p>Gestiona tus ingresos y gastos mensuales</p>
           </div>
           <GalaxyBtn onClick={() => setModal(true)}>+ Agregar</GalaxyBtn>
@@ -135,20 +135,20 @@ const [cargandoIA, setCargandoIA] = useState(false);
         {/* Resumen */}
         <div className="stat-grid">
           <div className="stat-card" style={{ borderLeft:"4px solid #16a34a" }}>
-            <div className="stat-label">📥 Total ingresos</div>
+            <div className="stat-label">Total ingresos</div>
             <div className="stat-value" style={{ color:"#16a34a" }}>₡{ingresos.toLocaleString()}</div>
           </div>
           <div className="stat-card" style={{ borderLeft:"4px solid #dc2626" }}>
-            <div className="stat-label">📤 Total gastos</div>
+            <div className="stat-label">Total gastos</div>
             <div className="stat-value" style={{ color:"#dc2626" }}>₡{egresos.toLocaleString()}</div>
           </div>
           <div className="stat-card" style={{ borderLeft:"4px solid #2563eb" }}>
-            <div className="stat-label">💳 Disponible</div>
+            <div className="stat-label">Disponible</div>
             <div className="stat-value" style={{ color: disponible >= 0 ? "#16a34a" : "#dc2626" }}>₡{disponible.toLocaleString()}</div>
             <div className="stat-sub">{disponible >= 0 ? "Tienes saldo positivo" : "⚠️ Gastos superan ingresos"}</div>
           </div>
           <div className="stat-card" style={{ borderLeft:"4px solid #7c3aed" }}>
-            <div className="stat-label">🎯 Ahorro sugerido</div>
+            <div className="stat-label">Ahorro sugerido</div>
             <div className="stat-value" style={{ color:"#7c3aed" }}>₡{Math.max(0, Math.round(ingresos * 0.2)).toLocaleString()}</div>
             <div className="stat-sub">20% de tus ingresos</div>
           </div>
